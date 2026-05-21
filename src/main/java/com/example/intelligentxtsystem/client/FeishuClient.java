@@ -28,6 +28,12 @@ public class FeishuClient {
     @Value("${feishu.app-secret}")
     private String appSecret;
 
+    @Value("${feishu.api-base-url}")
+    private String apiBaseUrl;
+
+    @Value("${feishu.token-buffer-seconds}")
+    private int tokenBufferSeconds;
+
     private final RestTemplate restTemplate = new RestTemplate();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -43,7 +49,7 @@ public class FeishuClient {
             return;
         }
 
-        String url = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal";
+        String url = apiBaseUrl + "/auth/v3/tenant_access_token/internal";
         Map<String, String> body = Map.of(
                 "app_id", appId,
                 "app_secret", appSecret
@@ -54,7 +60,7 @@ public class FeishuClient {
 
         tenantAccessToken = (String) result.get("tenant_access_token");
         int expire = (int) result.get("expire");
-        expireTime = System.currentTimeMillis() + expire * 1000 - 60 * 1000; // 提前1分钟过期
+        expireTime = System.currentTimeMillis() + expire * 1000L - tokenBufferSeconds * 1000L;
     }
 
     /**
@@ -64,7 +70,7 @@ public class FeishuClient {
     public void sendText(String receiveId, String text) {
         ensureToken();
 
-        String url = "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id";
+        String url = apiBaseUrl + "/im/v1/messages?receive_id_type=chat_id";
 
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(tenantAccessToken);
@@ -136,7 +142,7 @@ public class FeishuClient {
      * 仅创建日程，不添加参与者
      */
     private String createCalendarEventOnly(String summary, long startTimestamp, long endTimestamp) {
-        String url = "https://open.feishu.cn/open-apis/calendar/v4/calendars/" + calendarId + "/events";
+        String url = apiBaseUrl + "/calendar/v4/calendars/" + calendarId + "/events";
 
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(tenantAccessToken);
@@ -190,7 +196,7 @@ public class FeishuClient {
      * 添加参与者到日程
      */
     private String addAttendeeToEvent(String eventId, String openId) {
-        String url = "https://open.feishu.cn/open-apis/calendar/v4/calendars/" + calendarId + "/events/" + eventId + "/attendees";
+        String url = apiBaseUrl + "/calendar/v4/calendars/" + calendarId + "/events/" + eventId + "/attendees";
 
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(tenantAccessToken);
@@ -232,7 +238,7 @@ public class FeishuClient {
      * 获取应用的主日历ID
      */
     private String getPrimaryCalendarId() {
-        String url = "https://open.feishu.cn/open-apis/calendar/v4/calendars";
+        String url = apiBaseUrl + "/calendar/v4/calendars";
 
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(tenantAccessToken);
@@ -268,7 +274,7 @@ public class FeishuClient {
     public String getUserId(String unionId) {
         ensureToken();
 
-        String url = "https://open.feishu.cn/open-apis/contact/v3/users/" + unionId;
+        String url = apiBaseUrl + "/contact/v3/users/" + unionId;
 
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(tenantAccessToken);
@@ -301,7 +307,7 @@ public class FeishuClient {
     public String createGroup(String groupName) {
         ensureToken();
 
-        String url = "https://open.feishu.cn/open-apis/im/v1/chats";
+        String url = apiBaseUrl + "/im/v1/chats";
 
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(tenantAccessToken);

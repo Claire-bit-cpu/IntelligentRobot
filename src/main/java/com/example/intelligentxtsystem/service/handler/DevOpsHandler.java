@@ -1,6 +1,7 @@
 package com.example.intelligentxtsystem.service.handler;
 
 import com.example.intelligentxtsystem.dto.FeishuSender;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.net.HttpURLConnection;
@@ -23,6 +24,12 @@ import java.util.regex.Pattern;
 public class DevOpsHandler implements CommandHandler {
 
     private final long startTime = System.currentTimeMillis();
+
+    @Value("${devops.ping-timeout-ms}")
+    private int pingTimeoutMs;
+
+    @Value("${devops.http-timeout-ms}")
+    private int httpTimeoutMs;
 
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -110,7 +117,7 @@ public class DevOpsHandler implements CommandHandler {
         try {
             String cleanHost = host.replaceAll("^https?://", "").replaceAll("/.*$", "");
             long start = System.currentTimeMillis();
-            boolean reachable = InetAddress.getByName(cleanHost).isReachable(5000);
+            boolean reachable = InetAddress.getByName(cleanHost).isReachable(pingTimeoutMs);
             long pingTime = System.currentTimeMillis() - start;
 
             if (reachable) {
@@ -129,8 +136,8 @@ public class DevOpsHandler implements CommandHandler {
                 long start = System.currentTimeMillis();
                 HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
                 conn.setRequestMethod("GET");
-                conn.setConnectTimeout(5000);
-                conn.setReadTimeout(5000);
+                conn.setConnectTimeout(httpTimeoutMs);
+                conn.setReadTimeout(httpTimeoutMs);
                 // 只获取响应码，不读body
                 int code = conn.getResponseCode();
                 long httpTime = System.currentTimeMillis() - start;

@@ -20,15 +20,16 @@ public class GitHubClient {
     @Value("${github.token:}")
     private String token;
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    @Value("${github.api-url}")
+    private String apiUrl;
 
-    private static final String API_URL = "https://api.github.com";
+    private final RestTemplate restTemplate = new RestTemplate();
 
     /**
      * 获取仓库信息
      */
     public String getRepoInfo(String owner, String repo) {
-        String url = API_URL + "/repos/" + owner + "/" + repo;
+        String url = apiUrl + "/repos/" + owner + "/" + repo;
 
         HttpHeaders headers = new HttpHeaders();
         if (token != null && !token.isEmpty()) {
@@ -67,7 +68,7 @@ public class GitHubClient {
      * 获取Pull Request信息
      */
     public String getPRInfo(String owner, String repo, int prNumber) {
-        String url = API_URL + "/repos/" + owner + "/" + repo + "/pulls/" + prNumber;
+        String url = apiUrl + "/repos/" + owner + "/" + repo + "/pulls/" + prNumber;
 
         HttpHeaders headers = new HttpHeaders();
         if (token != null && !token.isEmpty()) {
@@ -110,7 +111,7 @@ public class GitHubClient {
      * 获取PR的代码差异（diff）
      */
     public String getPRDiff(String owner, String repo, int prNumber) {
-        String url = API_URL + "/repos/" + owner + "/" + repo + "/pulls/" + prNumber;
+        String url = apiUrl + "/repos/" + owner + "/" + repo + "/pulls/" + prNumber;
 
         HttpHeaders headers = new HttpHeaders();
         if (token != null && !token.isEmpty()) {

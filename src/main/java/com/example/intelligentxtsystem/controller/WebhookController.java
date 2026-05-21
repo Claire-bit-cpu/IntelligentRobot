@@ -11,6 +11,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.HttpClientErrorException;
 
@@ -31,7 +32,12 @@ public class WebhookController {
 
     // 消息去重缓存（messageId -> 处理时间）
     private final ConcurrentHashMap<String, Long> processedMessages = new ConcurrentHashMap<>();
-    private static final long DEDUP_TIME_MS = 30000; // 30秒内去重
+
+    @Value("${dedup.window-ms}")
+    private long dedupWindowMs;
+
+    @Value("${dedup.cleanup-ms}")
+    private long dedupCleanupMs;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -110,7 +116,7 @@ public class WebhookController {
             Long lastTime = processedMessages.putIfAbsent(messageId, now);
             
             if (lastTime != null) {
-                if (now - lastTime < DEDUP_TIME_MS) {
+                if (now - lastTime < dedupWindowMs) {
                     log.info("消息 {} 已在 {}ms 前处理过，跳过", messageId, now - lastTime);
                     return Map.of("code", 0, "msg", "ok");
                 } else {
@@ -120,7 +126,7 @@ public class WebhookController {
             }
 
             // 清理过期记录（超过10分钟的旧记录）
-            processedMessages.entrySet().removeIf(entry -> now - entry.getValue() > 600000);
+            processedMessages.entrySet().removeIf(entry -> now - entry.getValue() > dedupCleanupMs);
 
             // 提取消息文本
             String text = extractText(callback);

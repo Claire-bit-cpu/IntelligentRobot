@@ -20,9 +20,16 @@ public class QwenClient {
     @Value("${qianyu.api-key}")
     private String apiKey;
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    @Value("${qianyu.api-url}")
+    private String apiUrl;
 
-    private static final String API_URL = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation";
+    @Value("${qianyu.model}")
+    private String model;
+
+    @Value("${qianyu.max-diff-length}")
+    private int maxDiffLength;
+
+    private final RestTemplate restTemplate = new RestTemplate();
 
     /**
      * 使用通义千问进行翻译（中英互译）
@@ -89,7 +96,7 @@ public class QwenClient {
         logger.info("开始调用通义千问 API");
 
         Map<String, Object> body = Map.of(
-                "model", "qwen-turbo",
+                "model", model,
                 "input", Map.of("prompt", prompt)
         );
 
@@ -99,10 +106,9 @@ public class QwenClient {
 
         var entity = new org.springframework.http.HttpEntity<>(body, headers);
 
-        logger.info("API 请求 URL: " + API_URL);
-        logger.info("API 请求体: " + body);
+        logger.info("API 请求 URL: " + apiUrl);
 
-        var response = restTemplate.postForEntity(API_URL, entity, Map.class);
+        var response = restTemplate.postForEntity(apiUrl, entity, Map.class);
 
         logger.info("API 响应状态: " + response.getStatusCode());
 
@@ -193,7 +199,7 @@ public class QwenClient {
      */
     private String buildCodeReviewPrompt(String diff, String prInfo) {
         // 限制 diff 长度，避免超出 API 限制
-        String truncatedDiff = diff.length() > 8000 ? diff.substring(0, 8000) + "\n... (代码过长，已截断)" : diff;
+        String truncatedDiff = diff.length() > maxDiffLength ? diff.substring(0, maxDiffLength) + "\n... (代码过长，已截断)" : diff;
 
         return String.format("""
                 你是一位资深代码审查专家，请对以下 Pull Request 进行代码审查。

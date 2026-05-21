@@ -10,14 +10,30 @@ amap:
 feishu:
   app-id: ${FEISHU_APP_ID:}
   app-secret: ${FEISHU_APP_SECRET:}
+  api-base-url: ${FEISHU_API_BASE_URL:https://open.feishu.cn/open-apis}
+  token-buffer-seconds: ${FEISHU_TOKEN_BUFFER_SECONDS:60}
 
 # 通义千问 API
 qianyu:
   api-key: ${QIANYU_API_KEY:}
+  api-url: ${QIANYU_API_URL:https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation}
+  model: ${QIANYU_MODEL:qwen-turbo}
+  max-diff-length: ${QIANYU_MAX_DIFF_LENGTH:8000}
 
 # GitHub 配置
 github:
   token: ${GITHUB_TOKEN:}
+  api-url: ${GITHUB_API_URL:https://api.github.com}
+
+# 消息去重配置
+dedup:
+  window-ms: ${DEDUP_WINDOW_MS:30000}
+  cleanup-ms: ${DEDUP_CLEANUP_MS:600000}
+
+# DevOps 配置
+devops:
+  ping-timeout-ms: ${DEVOPS_PING_TIMEOUT_MS:5000}
+  http-timeout-ms: ${DEVOPS_HTTP_TIMEOUT_MS:5000}
 
 server:
   port: 8080
