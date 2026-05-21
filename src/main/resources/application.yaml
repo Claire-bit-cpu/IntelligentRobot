@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: IntelligentxtSystem
+
+# 高德天气 API Key
+amap:
+  key: ${AMAP_KEY:}
+
+# 飞书配置
+feishu:
+  app-id: ${FEISHU_APP_ID:}
+  app-secret: ${FEISHU_APP_SECRET:}
+
+# 通义千问 API
+qianyu:
+  api-key: ${QIANYU_API_KEY:}
+
+# GitHub 配置
+github:
+  token: ${GITHUB_TOKEN:}
+
+server:
+  port: 8080
