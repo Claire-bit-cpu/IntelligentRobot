@@ -14,7 +14,6 @@ import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.Map;
 
 @Component
@@ -34,8 +33,13 @@ public class FeishuClient {
     @Value("${feishu.token-buffer-seconds}")
     private int tokenBufferSeconds;
 
-    private final RestTemplate restTemplate = new RestTemplate();
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final RestTemplate restTemplate;
+    private final ObjectMapper objectMapper;
+
+    public FeishuClient(RestTemplate restTemplate, ObjectMapper objectMapper) {
+        this.restTemplate = restTemplate;
+        this.objectMapper = objectMapper;
+    }
 
     private String tenantAccessToken;
     private long expireTime = 0;
@@ -302,9 +306,10 @@ public class FeishuClient {
      * 创建群组
      *
      * @param groupName 群组名称
-     * @return 创建结果
+     * @param creatorOpenId 创建者的 open_id，会自动加入群聊
+     * @return 创建结果（成功返回 "success"，失败返回原因）
      */
-    public String createGroup(String groupName) {
+    public String createGroup(String groupName, String creatorOpenId) {
         ensureToken();
 
         String url = apiBaseUrl + "/im/v1/chats";
@@ -313,11 +318,13 @@ public class FeishuClient {
         headers.setBearerAuth(tenantAccessToken);
         headers.setContentType(MediaType.APPLICATION_JSON);
 
-        Map<String, Object> body = Map.of(
-                "name", groupName,
-                "chat_mode", "group",
-                "chat_type", "private"
-        );
+        Map<String, Object> body = new java.util.HashMap<>();
+        body.put("name", groupName);
+        body.put("chat_mode", "group");
+        body.put("chat_type", "public");
+        if (creatorOpenId != null && !creatorOpenId.isEmpty()) {
+            body.put("user_id_list", java.util.List.of(creatorOpenId));
+        }
 
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
 

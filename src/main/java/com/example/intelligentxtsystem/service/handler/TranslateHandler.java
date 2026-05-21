@@ -2,9 +2,9 @@ package com.example.intelligentxtsystem.service.handler;
 
 import com.example.intelligentxtsystem.client.QwenClient;
 import com.example.intelligentxtsystem.dto.FeishuSender;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
-
-import java.util.logging.Logger;
 
 /**
  * 翻译指令处理器
@@ -14,7 +14,7 @@ import java.util.logging.Logger;
 @Component
 public class TranslateHandler implements CommandHandler {
 
-    private static final Logger logger = Logger.getLogger(TranslateHandler.class.getName());
+    private static final Logger log = LoggerFactory.getLogger(TranslateHandler.class);
     private final QwenClient qwenClient;
 
     public TranslateHandler(QwenClient qwenClient) {
@@ -23,20 +23,14 @@ public class TranslateHandler implements CommandHandler {
 
     @Override
     public boolean support(String text) {
-        boolean supported = text.startsWith("/translate") || text.startsWith("翻译");
-        logger.info("TranslateHandler.support() 被调用: text=" + text + ", supported=" + supported);
-        return supported;
+        return text.startsWith("/translate") || text.startsWith("翻译");
     }
 
     @Override
     public String handle(String text, FeishuSender sender) {
-        logger.info("TranslateHandler.handle() 被调用: text=" + text);
-
         String content = text
                 .replaceAll("^(/translate|翻译)\\s*", "")
                 .trim();
-
-        logger.info("提取的翻译内容: " + content);
 
         if (content.isEmpty()) {
             return "❌ 用法：/translate <文本>\n例如：/translate Hello";
@@ -48,10 +42,10 @@ public class TranslateHandler implements CommandHandler {
 
         try {
             String translated = qwenClient.translate(content);
-            logger.info("翻译结果: " + translated);
+            log.info("翻译结果: {}", translated);
             return "🌐 翻译结果：\n" + translated;
         } catch (Exception e) {
-            logger.warning("翻译异常: " + e.getMessage());
+            log.warn("翻译异常: {}", e.getMessage());
             return "⚠️ 翻译服务暂时不可用，请稍后再试";
         }
     }

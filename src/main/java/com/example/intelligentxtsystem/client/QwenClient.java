@@ -29,7 +29,11 @@ public class QwenClient {
     @Value("${qianyu.max-diff-length}")
     private int maxDiffLength;
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate;
+
+    public QwenClient(RestTemplate restTemplate) {
+        this.restTemplate = restTemplate;
+    }
 
     /**
      * 使用通义千问进行翻译（中英互译）

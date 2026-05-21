@@ -23,7 +23,11 @@ public class GitHubClient {
     @Value("${github.api-url}")
     private String apiUrl;
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate;
+
+    public GitHubClient(RestTemplate restTemplate) {
+        this.restTemplate = restTemplate;
+    }
 
     /**
      * 获取仓库信息

@@ -45,7 +45,8 @@ public class GroupHandler implements CommandHandler {
         }
 
         try {
-            String result = feishuClient.createGroup(groupName);
+            String openId = sender != null ? sender.getOpenId() : null;
+            String result = feishuClient.createGroup(groupName, openId);
 
             if ("success".equals(result)) {
                 return String.format("""
