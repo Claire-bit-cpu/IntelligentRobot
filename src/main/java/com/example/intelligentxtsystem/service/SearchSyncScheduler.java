@@ -17,6 +17,7 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
 /**
  * 搜索索引定时同步调度器
@@ -36,6 +37,12 @@ public class SearchSyncScheduler {
 
     @Value("${search.max-sync-messages-per-chat:500}")
     private int maxMessagesPerChat;
+
+    @Value("${search.sync-chat-ids:}")
+    private String syncChatIdsConfig;
+
+    @Value("${search.sync-wiki-space-ids:}")
+    private String syncWikiSpaceIdsConfig;
 
     private final AtomicBoolean syncing = new AtomicBoolean(false);
 
@@ -121,7 +128,10 @@ public class SearchSyncScheduler {
             // 2. 同步知识库文档
             syncWikiDocuments(docs);
 
-            // 3. 重建索引
+            // 3. 同步云文档
+            syncDriveDocuments(docs);
+
+            // 4. 重建索引
             indexService.rebuildIndex(docs);
 
             long elapsed = System.currentTimeMillis() - startTime;
@@ -134,67 +144,88 @@ public class SearchSyncScheduler {
     }
 
     /**
-     * 同步群聊消息：获取机器人所在群聊 → 逐群拉取消息 → 解析为 IndexDoc
+     * 同步群聊消息：支持自动发现模式（auto/*）或指定群聊ID
+     * - 空配置：跳过群聊同步
+     * - auto/*：自动同步机器人加入的所有群聊
+     * - 具体ID列表：同步指定的群聊
+     *
+     * 只同步群文件和文档消息，过滤掉所有普通文本消息
      */
     @SuppressWarnings("unchecked")
     private void syncGroupMessages(List<SearchIndexService.IndexDoc> docs) {
-        List<Map<String, Object>> chats = feishuClient.listBotChats();
-        log.info("发现 {} 个群聊，开始同步消息", chats.size());
+        // 空值检查：如果配置为空或仅包含空白字符，跳过同步
+        if (syncChatIdsConfig == null || syncChatIdsConfig.isBlank()) {
+            log.info("未配置同步群聊（search.sync-chat-ids），跳过群聊同步");
+            return;
+        }
 
-        for (Map<String, Object> chat : chats) {
-            String chatId = (String) chat.get("chat_id");
-            String chatName = (String) chat.getOrDefault("name", "");
-            if (chatId == null) continue;
+        Set<String> targetChatIds;
 
+        // 判断是否为自动发现模式
+        String config = syncChatIdsConfig.trim();
+        boolean autoDiscover = "auto".equalsIgnoreCase(config) || "*".equals(config);
+
+        if (autoDiscover) {
+            // 自动发现：获取机器人所在的所有群聊
+            log.info("自动发现模式：获取机器人所在的所有群聊...");
+            java.util.List<Map<String, Object>> chats = feishuClient.listBotChats();
+            targetChatIds = chats.stream()
+                    .map(chat -> (String) chat.get("chat_id"))
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toSet());
+            log.info("自动发现 {} 个群聊", targetChatIds.size());
+        } else {
+            // 手动配置模式：解析配置的群聊ID列表
+            targetChatIds = parseConfigIds(syncChatIdsConfig);
+            if (targetChatIds.isEmpty()) {
+                log.info("未配置同步群聊（search.sync-chat-ids），跳过群聊同步");
+                return;
+            }
+        }
+
+        log.info("开始同步 {} 个群聊的消息: {}", targetChatIds.size(), targetChatIds);
+
+        for (String chatId : targetChatIds) {
             try {
                 List<Map<String, Object>> messages = feishuClient.fetchChatMessages(chatId, maxMessagesPerChat);
-                log.debug("群聊[{}]获取到 {} 条消息", chatName, messages.size());
+                log.info("群聊[{}]获取到 {} 条消息", chatId, messages.size());
 
+                // 尝试获取群名（从消息中提取，或直接用 chatId）
+                String chatName = chatId;
+
+                int fileCount = 0;
                 for (Map<String, Object> item : messages) {
                     String msgType = (String) item.getOrDefault("msg_type", "");
                     String createTime = (String) item.getOrDefault("create_time", "");
                     String messageId = (String) item.getOrDefault("message_id", "");
 
+                    // 只处理文件/文档类消息，过滤掉所有普通文本消息
+                    if (!FILE_TYPES.contains(msgType)) {
+                        continue;
+                    }
+
                     // 解析消息体
                     Map<String, Object> contentMap = parseMessageContent(item);
+
+                    // 文件/文档类消息
+                    String fileName = extractFileName(contentMap, msgType);
+                    if (fileName == null) continue;
+
+                    // 解析发送者类型（用于extra信息）
                     String senderType = "";
                     Object senderObj = item.get("sender");
                     if (senderObj instanceof Map senderMap) {
                         senderType = (String) senderMap.getOrDefault("sender_type", "");
                     }
 
-                    String title;
-                    String content;
-                    String source;
-                    String extra;
-
-                    if (FILE_TYPES.contains(msgType)) {
-                        // 文件/文档类消息
-                        String fileName = extractFileName(contentMap, msgType);
-                        if (fileName == null) continue;
-                        title = fileName;
-                        content = fileName;
-                        source = "group_file";
-                        extra = String.format("{\"file_type\":\"%s\",\"sender_type\":\"%s\",\"chat_name\":\"%s\"}",
-                                msgType, senderType, escapeJson(chatName));
-                    } else if ("text".equals(msgType)) {
-                        // 文本消息
-                        String text = contentMap != null ? (String) contentMap.getOrDefault("text", "") : "";
-                        text = cleanText(text);
-                        if (text.isEmpty() || text.startsWith("/") || text.length() < 3) continue;
-                        title = text.length() > 60 ? text.substring(0, 60) + "..." : text;
-                        content = text;
-                        source = "group_text";
-                        extra = String.format("{\"sender_type\":\"%s\",\"chat_name\":\"%s\"}",
-                                senderType, escapeJson(chatName));
-                    } else {
-                        // 其他类型暂不索引
-                        continue;
-                    }
+                    String extra = String.format("{\"file_type\":\"%s\",\"sender_type\":\"%s\",\"chat_name\":\"%s\"}",
+                            msgType, senderType, escapeJson(chatName));
 
                     String formattedTime = formatTimestamp(createTime);
-                    docs.add(new SearchIndexService.IndexDoc(title, content, source, messageId, chatId, extra, formattedTime));
+                    docs.add(new SearchIndexService.IndexDoc(fileName, fileName, "group_file", messageId, chatId, extra, formattedTime));
+                    fileCount++;
                 }
+                log.info("群聊[{}]获取到 {} 条消息，索引 {} 个文件/文档", chatId, messages.size(), fileCount);
             } catch (Exception e) {
                 log.warn("同步群聊消息失败 chatId={}", chatId, e);
             }
@@ -202,30 +233,171 @@ public class SearchSyncScheduler {
     }
 
     /**
-     * 同步知识库文档
+     * 同步知识库文档：支持自动发现模式（auto/*）或指定空间ID
+     * - 空配置：跳过知识库同步
+     * - auto/*：自动同步机器人可访问的所有知识库空间
+     * - 具体ID列表：同步指定的知识库空间
+     *
+     * 改进：获取文档正文内容，而不仅仅是标题
      */
     @SuppressWarnings("unchecked")
     private void syncWikiDocuments(List<SearchIndexService.IndexDoc> docs) {
-        try {
-            List<Map<String, Object>> wikiDocs = feishuClient.fetchAllWikiDocuments();
-            log.info("获取到 {} 条知识库文档", wikiDocs.size());
-
-            for (Map<String, Object> doc : wikiDocs) {
-                String title = (String) doc.getOrDefault("title", "");
-                String spaceName = (String) doc.getOrDefault("space_name", "");
-                String nodeToken = (String) doc.getOrDefault("node_token", "");
-                String objType = (String) doc.getOrDefault("obj_type", "");
-
-                if (title.isEmpty()) continue;
-
-                String extra = String.format("{\"space_name\":\"%s\",\"obj_type\":\"%s\",\"node_token\":\"%s\"}",
-                        escapeJson(spaceName), objType, nodeToken);
-
-                docs.add(new SearchIndexService.IndexDoc(title, title, "wiki", nodeToken, "", extra, ""));
-            }
-        } catch (Exception e) {
-            log.warn("同步知识库文档失败", e);
+        // 空值检查：如果配置为空或仅包含空白字符，跳过同步
+        if (syncWikiSpaceIdsConfig == null || syncWikiSpaceIdsConfig.isBlank()) {
+            log.info("未配置同步知识库（search.sync-wiki-space-ids），跳过知识库同步");
+            return;
         }
+
+        Set<String> targetSpaceIds;
+
+        // 判断是否为自动发现模式
+        String config = syncWikiSpaceIdsConfig.trim();
+        boolean autoDiscover = "auto".equalsIgnoreCase(config) || "*".equals(config);
+
+        if (autoDiscover) {
+            // 自动发现：获取机器人可访问的所有知识库空间
+            log.info("自动发现模式：获取机器人可访问的所有知识库空间...");
+            java.util.List<Map<String, Object>> spaces = feishuClient.listWikiSpaces();
+            targetSpaceIds = spaces.stream()
+                    .map(space -> (String) space.get("space_id"))
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toSet());
+            log.info("自动发现 {} 个知识库空间", targetSpaceIds.size());
+        } else {
+            // 手动配置模式：解析配置的知识库空间ID列表
+            targetSpaceIds = parseConfigIds(syncWikiSpaceIdsConfig);
+            if (targetSpaceIds.isEmpty()) {
+                log.info("未配置同步知识库（search.sync-wiki-space-ids），跳过知识库同步");
+                return;
+            }
+        }
+
+        log.info("开始同步 {} 个知识库空间: {}", targetSpaceIds.size(), targetSpaceIds);
+
+        // 飞书知识库 obj_type 非文档类型（只排除文件夹等容器节点）
+        Set<String> excludeObjTypes = Set.of("folder");
+        // 支持的文档类型
+        Set<String> supportedDocTypes = Set.of("doc", "docx", "sheet", "bitable", "mindnote");
+
+        int docCount = 0;
+        for (String spaceId : targetSpaceIds) {
+            try {
+                List<Map<String, Object>> nodes = feishuClient.fetchWikiNodesBySpaceId(spaceId);
+                log.info("知识库空间[{}]获取到 {} 个节点", spaceId, nodes.size());
+
+                // 获取空间名称
+                String spaceName = feishuClient.getWikiSpaceName(spaceId);
+
+                for (Map<String, Object> node : nodes) {
+                    String title = (String) node.getOrDefault("title", "");
+                    String nodeToken = (String) node.getOrDefault("node_token", "");
+                    String objType = (String) node.getOrDefault("obj_type", "");
+
+                    if (title.isEmpty()) continue;
+                    if (excludeObjTypes.contains(objType)) continue;
+
+                    // 获取文档内容（如果是支持的文档类型）
+                    String content = title; // 默认使用标题
+                    if (supportedDocTypes.contains(objType)) {
+                        log.debug("获取知识库文档内容: title={}, objType={}, nodeToken={}", title, objType, nodeToken);
+                        String docContent = feishuClient.getWikiDocumentContent(objType, nodeToken);
+                        if (docContent != null && !docContent.isEmpty()) {
+                            content = docContent;
+                            log.debug("成功获取文档内容，长度={}", docContent.length());
+                        }
+                    }
+
+                    String extra = String.format("{\"space_name\":\"%s\",\"obj_type\":\"%s\",\"node_token\":\"%s\"}",
+                            escapeJson(spaceName), objType, nodeToken);
+
+                    docs.add(new SearchIndexService.IndexDoc(title, content, "wiki", nodeToken, "", extra, ""));
+                    docCount++;
+
+                    // 避免频繁调用 API，添加延迟
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("同步知识库文档失败 spaceId={}", spaceId, e);
+            }
+        }
+        log.info("知识库同步完成，共 {} 个文档", docCount);
+    }
+
+    /**
+     * 同步云文档
+     * 调用飞书 API：GET /drive/v1/files 获取云文档列表
+     * 然后调用 GET /docx/v1/documents/{document_id} 获取文档内容
+     */
+    @SuppressWarnings("unchecked")
+    private void syncDriveDocuments(List<SearchIndexService.IndexDoc> docs) {
+        log.info("开始同步云文档...");
+
+        try {
+            java.util.List<Map<String, Object>> files = feishuClient.listDriveFiles();
+            if (files == null || files.isEmpty()) {
+                log.info("未找到云文档");
+                return;
+            }
+
+            log.info("获取到 {} 个云文档", files.size());
+
+            int docCount = 0;
+            for (Map<String, Object> file : files) {
+                String fileName = (String) file.getOrDefault("name", "");
+                String fileToken = (String) file.getOrDefault("token", "");
+                String fileType = (String) file.getOrDefault("type", "");
+                String fileId = (String) file.getOrDefault("file_id", "");
+
+                if (fileName.isEmpty()) continue;
+
+                // 只处理文档类型（doc/docx）
+                if (!"doc".equals(fileType) && !"docx".equals(fileType) && !"sheet".equals(fileType)) {
+                    continue;
+                }
+
+                // 获取文档内容
+                String content = fileName; // 默认使用文件名
+                if ("docx".equals(fileType) && fileToken != null) {
+                    log.debug("获取云文档内容: fileName={}, fileType={}, fileToken={}", fileName, fileType, fileToken);
+                    String docContent = feishuClient.getDocumentContent(fileToken);
+                    if (docContent != null && !docContent.isEmpty()) {
+                        content = docContent;
+                        log.debug("成功获取云文档内容，长度={}", docContent.length());
+                    }
+                }
+
+                String extra = String.format("{\"file_type\":\"%s\",\"file_token\":\"%s\",\"file_id\":\"%s\"}",
+                        fileType, fileToken, fileId);
+
+                docs.add(new SearchIndexService.IndexDoc(fileName, content, "drive", fileToken, "", extra, ""));
+                docCount++;
+
+                // 避免频繁调用 API，添加延迟
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            log.info("云文档同步完成，共 {} 个文档", docCount);
+        } catch (Exception e) {
+            log.error("同步云文档失败", e);
+        }
+    }
+
+    /**
+     * 解析逗号分隔的 ID 配置
+     */
+    private Set<String> parseConfigIds(String config) {
+        if (config == null || config.isBlank()) return Set.of();
+        return Arrays.stream(config.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(java.util.stream.Collectors.toSet());
     }
 
     // ========== 解析辅助方法 ==========
@@ -262,19 +434,25 @@ public class SearchSyncScheduler {
      */
     private String extractFileName(Map<String, Object> contentMap, String msgType) {
         if (contentMap == null) return null;
-        return switch (msgType) {
-            case "file" -> (String) contentMap.getOrDefault("file_name", null);
-            case "doc", "docx", "sheet" -> {
+
+        switch (msgType) {
+            case "file":
+                return (String) contentMap.getOrDefault("file_name", null);
+            case "doc", "docx", "sheet": {
                 String t = (String) contentMap.getOrDefault("title", null);
-                yield t != null ? t : (String) contentMap.getOrDefault("file_name", null);
+                return t != null ? t : (String) contentMap.getOrDefault("file_name", null);
             }
-            case "wiki" -> {
+            case "wiki": {
                 String t = (String) contentMap.getOrDefault("title", null);
-                yield t != null ? t : "Wiki文档";
+                return t != null ? t : "Wiki文档";
             }
-            default -> (String) contentMap.getOrDefault("file_name",
-                    contentMap.getOrDefault("title", null) instanceof String s ? s : null);
-        };
+            default:
+                Object file_name = contentMap.getOrDefault("file_name", null);
+                Object title = contentMap.getOrDefault("title", null);
+                if (file_name instanceof String s) return s;
+                if (title instanceof String s) return s;
+                return null;
+        }
     }
 
     /**

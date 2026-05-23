@@ -5,6 +5,8 @@ import com.example.intelligentxtsystem.dto.FeishuSender;
 import com.example.intelligentxtsystem.service.SearchIndexService;
 import com.example.intelligentxtsystem.service.SearchSyncScheduler;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -17,12 +19,14 @@ import java.util.Map;
  * 1. 飞书官方 API（实时搜索群文件 + 知识库）
  * 2. 本地搜索引擎（SQLite FTS5，支持中文全文检索）
  *
- * 管理命令：
+ * 管理命令（仅群管理员可用）：
  * /search sync   - 手动触发索引同步
  * /search status - 查看索引状态
  */
 @Component
 public class SearchHandler implements CommandHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(SearchHandler.class);
 
     private final FeishuClient feishuClient;
     private final SearchIndexService indexService;
@@ -35,6 +39,22 @@ public class SearchHandler implements CommandHandler {
         this.indexService = indexService;
         this.syncScheduler = syncScheduler;
         this.objectMapper = objectMapper;
+    }
+
+    /**
+     * 检查用户是否为群管理员
+     * 
+     * @param senderOpenId 发送者的OpenID
+     * @param chatId 群聊ID
+     * @return true=是管理员，false=不是管理员或检查失败
+     */
+    private boolean isGroupAdmin(String senderOpenId, String chatId) {
+        if (senderOpenId == null || chatId == null) {
+            return false;
+        }
+        
+        java.util.Set<String> adminIds = feishuClient.getChatAdminIds(chatId);
+        return adminIds.contains(senderOpenId);
     }
 
     @Override
@@ -57,10 +77,6 @@ public class SearchHandler implements CommandHandler {
                     搜索 需求文档
                     查询 API接口
                     
-                    🔧 管理命令：
-                    /search sync   - 同步索引
-                    /search status - 索引状态
-                    
                     💡 搜索群内文件、飞书知识库及本地索引
                     """;
         }
@@ -69,12 +85,42 @@ public class SearchHandler implements CommandHandler {
             return "⚠️ 关键词长度不能超过200个字符";
         }
 
-        // 管理命令
-        if ("sync".equalsIgnoreCase(keyword)) {
-            return handleSync();
-        }
-        if ("status".equalsIgnoreCase(keyword)) {
-            return handleStatus();
+        // 管理命令（需要管理员权限）
+        if ("sync".equalsIgnoreCase(keyword) || "status".equalsIgnoreCase(keyword)) {
+            // 检查是否为群管理员
+            String senderOpenId = sender != null ? sender.getOpenId() : null;
+            
+            if (senderOpenId == null) {
+                log.warn("无法获取发送者OpenID，拒绝执行管理命令");
+                return """
+                        ❌ 无法验证权限
+                        
+                        🔒 请确保在群聊中使用此命令
+                        
+                        💡 如果问题持续，请联系开发者
+                        """;
+            }
+            
+            log.info("检查用户权限: senderOpenId={}, chatId={}", senderOpenId, chatId);
+            
+            if (!isGroupAdmin(senderOpenId, chatId)) {
+                log.warn("用户权限不足: senderOpenId={}, chatId={}", senderOpenId, chatId);
+                return """
+                        ❌ 权限不足
+                        
+                        🔒 /search sync 和 /search status 命令仅群管理员可用
+                        
+                        💡 请联系群管理员执行此操作
+                        """;
+            }
+
+            log.info("用户权限验证通过: senderOpenId={}", senderOpenId);
+            
+            if ("sync".equalsIgnoreCase(keyword)) {
+                return handleSync();
+            } else {
+                return handleStatus();
+            }
         }
 
         try {

@@ -42,8 +42,14 @@ public class SearchIndexService {
     public void init() throws SQLException {
         String url = "jdbc:sqlite:" + indexPath;
         conn = DriverManager.getConnection(url);
-        // WAL 模式提升并发性能
-        conn.createStatement().execute("PRAGMA journal_mode=WAL");
+        // WAL 模式提升并发性能（必须关闭 Statement，否则 ResultSet 占用连接导致 SQLITE_BUSY）
+        try (var stmt = conn.createStatement()) {
+            stmt.execute("PRAGMA journal_mode=WAL");
+        }
+        // 设置繁忙超时，避免并发操作时立即报 SQLITE_BUSY
+        try (var stmt = conn.createStatement()) {
+            stmt.execute("PRAGMA busy_timeout=5000");
+        }
         createTables();
         log.info("搜索索引数据库初始化完成: {}, 已索引文档数: {}", indexPath, getDocumentCount());
     }
@@ -62,25 +68,29 @@ public class SearchIndexService {
     private void createTables() throws SQLException {
         // FTS5 虚拟表，使用 trigram 分词器支持中文
         // title/content 被索引，其余字段 UNINDEXED 仅存储
-        conn.createStatement().execute("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS doc_fts USING fts5(
-                title, content,
-                source UNINDEXED,
-                source_id UNINDEXED,
-                chat_id UNINDEXED,
-                extra UNINDEXED,
-                created_time UNINDEXED,
-                tokenize='trigram'
-            )
-        """);
+        try (var stmt = conn.createStatement()) {
+            stmt.execute("""
+                CREATE VIRTUAL TABLE IF NOT EXISTS doc_fts USING fts5(
+                    title, content,
+                    source UNINDEXED,
+                    source_id UNINDEXED,
+                    chat_id UNINDEXED,
+                    extra UNINDEXED,
+                    created_time UNINDEXED,
+                    tokenize='trigram'
+                )
+            """);
+        }
 
         // 同步元信息表
-        conn.createStatement().execute("""
-            CREATE TABLE IF NOT EXISTS sync_meta (
-                key TEXT PRIMARY KEY,
-                value TEXT
-            )
-        """);
+        try (var stmt = conn.createStatement()) {
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS sync_meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            """);
+        }
     }
 
     /**
@@ -192,8 +202,8 @@ public class SearchIndexService {
      * 获取已索引文档数
      */
     public int getDocumentCount() {
-        try {
-            ResultSet rs = conn.createStatement().executeQuery("SELECT count(*) FROM doc_fts");
+        try (var stmt = conn.createStatement();
+             var rs = stmt.executeQuery("SELECT count(*) FROM doc_fts")) {
             return rs.next() ? rs.getInt(1) : 0;
         } catch (SQLException e) {
             return -1;
@@ -204,10 +214,8 @@ public class SearchIndexService {
      * 获取上次同步时间
      */
     public String getLastSyncTime() {
-        try {
-            ResultSet rs = conn.createStatement().executeQuery(
-                    "SELECT value FROM sync_meta WHERE key='last_sync'"
-            );
+        try (var stmt = conn.createStatement();
+             var rs = stmt.executeQuery("SELECT value FROM sync_meta WHERE key='last_sync'")) {
             return rs.next() ? rs.getString(1) : "从未同步";
         } catch (SQLException e) {
             return "未知";

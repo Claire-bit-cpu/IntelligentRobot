@@ -44,3 +44,7 @@ search:
   index-path: ${SEARCH_INDEX_PATH:./search-index.db}
   sync-interval-ms: ${SEARCH_SYNC_INTERVAL_MS:7200000}  # 全量同步间隔，默认2小时
   max-sync-messages-per-chat: ${SEARCH_MAX_SYNC_MESSAGES:500}  # 每个群聊最多同步消息数
+  # 指定同步的群聊 ID 列表（为空则不同步任何群聊）
+  sync-chat-ids: ${SEARCH_SYNC_CHAT_IDS:auto}
+  # 指定同步的知识库空间 ID 列表（为空则不同步任何知识库）
+  sync-wiki-space-ids: ${SEARCH_SYNC_WIKI_SPACE_IDS:auto}
