@@ -36,6 +36,8 @@ build/
 *.db
 *.db-shm
 *.db-wal
+*.db.bak
+search-index.*
 
 # Build output
 /target/
