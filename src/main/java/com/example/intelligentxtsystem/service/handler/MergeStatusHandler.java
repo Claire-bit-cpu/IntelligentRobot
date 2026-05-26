@@ -98,17 +98,17 @@ public class MergeStatusHandler implements CommandHandler {
         for (Map<String, Object> pr : prs) {
             int number = (Integer) pr.get("number");
             String title = (String) pr.get("title");
-            String sourceBranch = (String) pr.get("head");
-            String targetBranch = (String) pr.get("base");
             String state = (String) pr.get("state");
             String htmlUrl = (String) pr.get("html_url");
 
             sb.append("**#").append(number).append("** ");
             sb.append(title != null ? title : "(无标题)").append("\n");
             
-            // 解析分支信息
-            String headRef = (sourceBranch != null) ? ((Map<String, Object>) pr.get("head")).get("ref").toString() : "unknown";
-            String baseRef = (targetBranch != null) ? ((Map<String, Object>) pr.get("base")).get("ref").toString() : "unknown";
+            // 解析分支信息（head 和 base 是 Map 类型）
+            Map<String, Object> head = (Map<String, Object>) pr.get("head");
+            Map<String, Object> base = (Map<String, Object>) pr.get("base");
+            String headRef = (head != null && head.get("ref") != null) ? head.get("ref").toString() : "unknown";
+            String baseRef = (base != null && base.get("ref") != null) ? base.get("ref").toString() : "unknown";
             
             sb.append("  🌿 `").append(headRef).append("` → `").append(baseRef).append("`\n");
             sb.append("  🔗 ").append(htmlUrl).append("\n\n");

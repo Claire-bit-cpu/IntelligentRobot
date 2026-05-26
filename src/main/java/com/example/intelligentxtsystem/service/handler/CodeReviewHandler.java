@@ -29,7 +29,10 @@ public class CodeReviewHandler implements CommandHandler {
 
     @Override
     public boolean support(String text) {
-        return text.startsWith("/cr") || text.startsWith("审查") || text.startsWith("代码审查");
+        // 精确匹配：/cr 后面必须跟空格或结束，避免匹配 /createbranch 等命令
+        return text.equals("/cr") || text.startsWith("/cr ") || 
+               text.startsWith("审查 ") || text.equals("审查") ||
+               text.startsWith("代码审查 ") || text.equals("代码审查");
     }
 
     @Override

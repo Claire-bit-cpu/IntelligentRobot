@@ -39,8 +39,11 @@ public class CreateBranchHandler implements CommandHandler {
     public String handle(String text, FeishuSender sender, String chatId) {
         // 权限检查
         String openId = sender.getOpenId();
+        // 打印用户 Open ID，用于配置白名单
+        log.info("用户 Open ID: {}", openId);
         if (openId == null || !permissionService.hasWritePermission(openId)) {
-            return "❌ 权限不足！创建分支需要管理员或开发者权限。\n请联系管理员将你的飞书账号加入白名单。";
+            log.warn("用户 {} 权限不足，无法创建分支", openId);
+            return "❌ 权限不足！创建分支需要管理员或开发者权限。\n请联系管理员将你的飞书账号加入白名单。\n您的 Open ID 已打印在日志中，请查看应用日志获取。";
         }
 
         String[] parts = text.trim().split("\\s+");
