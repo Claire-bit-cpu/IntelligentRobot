@@ -29,17 +29,31 @@ github:
   api-url: ${GITHUB_API_URL:https://api.github.com}
   # Webhook 签名密钥（在 GitHub 仓库设置 → Webhooks → Secret 中配置）
   webhook-secret: ${GITHUB_WEBHOOK_SECRET:}
+  # 是否启用 Webhook 自动代码审查（push/PR 事件触发）
+  webhook:
+    auto-review: ${GITHUB_WEBHOOK_AUTO_REVIEW:true}
   # 仓库别名映射（别名 = owner/repo）
   repo-aliases:
-    #test是别名
+    # test是别名
     test: Claire-bit-cpu/Test
     frontend: Claire-bit-cpu/frontend-repo
     backend: Claire-bit-cpu/backend-repo
   # 写权限白名单（飞书用户 Open ID，逗号分隔）
-   #该用户可以执行合并代码（Merge）、创建 Issue、修改仓库设置等（这些是有风险的操作）
+  # 该用户可以执行合并代码（Merge）、创建 Issue、修改仓库设置等（这些是有风险的操作）
   admin-open-ids: ${GITHUB_ADMIN_OPEN_IDS:}
-  #该用户拥有日常开发权限
+  # 该用户拥有日常开发权限
   developer-open-ids: ${GITHUB_DEVELOPER_OPEN_IDS:}
+  
+  # GitHub Actions 部署配置
+  # 用于 /deploy 指令触发 GitHub Actions 工作流
+  # 格式：环境名:owner/repo:工作流文件名:分支名（多个环境用逗号分隔）
+  deploy: "dev:Claire-bit-cpu/Test:deploy-dev.yml:develop,test:Claire-bit-cpu/Test:deploy-test.yml:test,staging:Claire-bit-cpu/Test:deploy-staging.yml:staging,prod:Claire-bit-cpu/Test:deploy-prod.yml:main"
+
+# GitLab 配置
+gitlab:
+  api-url: ${GITLAB_API_URL:https://gitlab.com/api/v4}
+  token: ${GITLAB_TOKEN:}
+  enabled: ${GITLAB_ENABLED:false}
 
 # 消息去重配置
 dedup:
@@ -50,6 +64,31 @@ dedup:
 devops:
   ping-timeout-ms: ${DEVOPS_PING_TIMEOUT_MS:5000}
   http-timeout-ms: ${DEVOPS_HTTP_TIMEOUT_MS:5000}
+
+# GitHub Actions 部署配置
+# 用于 /deploy 指令触发 GitHub Actions 工作流
+# 需要配置 github.token 才能使用真实部署功能
+# 注意：此配置块已合并到上方的 github 配置中，避免重复
+
+# JIRA 配置
+jira:
+  url: ${JIRA_URL:https://your-domain.atlassian.net}
+  username: ${JIRA_USERNAME:}
+  api-token: ${JIRA_API_TOKEN:}
+  enabled: ${JIRA_ENABLED:false}
+  # 本地降级模式：当无法连接 JIRA 云服务时，任务记录到此文件
+  local-fallback-file: ${JIRA_LOCAL_FALLBACK_FILE:./local_tasks.md}
+
+# Prometheus 配置
+prometheus:
+  url: ${PROMETHEUS_URL:http://localhost:9090}
+  enabled: ${PROMETHEUS_ENABLED:false}
+
+# Grafana 配置
+grafana:
+  url: ${GRAFANA_URL:http://localhost:3000}
+  api-key: ${GRAFANA_API_KEY:}
+  enabled: ${GRAFANA_ENABLED:false}
 
 server:
   port: 8082

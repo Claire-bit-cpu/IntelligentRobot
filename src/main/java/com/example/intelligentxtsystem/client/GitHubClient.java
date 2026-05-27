@@ -236,6 +236,37 @@ public class GitHubClient {
         return null;
     }
 
+    /**
+     * 获取提交的代码差异（diff 文本）
+     * @param owner 仓库所有者
+     * @param repo 仓库名称
+     * @param sha 提交 SHA
+     * @return diff 文本
+     */
+    public String getCommitDiff(String owner, String repo, String sha) {
+        String url = apiUrl + "/repos/" + owner + "/" + repo + "/commits/" + sha;
+
+        HttpHeaders headers = new HttpHeaders();
+        if (token != null && !token.isEmpty()) {
+            headers.set("Authorization", "Bearer " + token);
+        }
+        headers.set("Accept", "application/vnd.github.v3.diff");
+
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+
+        try {
+            ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.GET, entity, String.class);
+
+            if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
+                return response.getBody();
+            }
+            return null;
+        } catch (Exception e) {
+            logger.error("获取提交 diff 异常: sha={}", sha, e);
+            return null;
+        }
+    }
+
 /**
  * 创建分支
  * @param owner 仓库所有者
@@ -461,5 +492,124 @@ public String getBranchSha(String owner, String repo, String branch) {
             return String.format("%.1fk", count / 1000.0);
         }
         return String.valueOf(count);
+    }
+
+    /**
+     * 触发 GitHub Actions 工作流
+     * @param owner 仓库所有者
+     * @param repo 仓库名称
+     * @param workflowId 工作流 ID 或文件名（如 ci.yml）
+     * @param ref 分支或 tag（如 main）
+     * @param inputs 工作流输入参数（可选）
+     * @return 触发结果
+     */
+    public String triggerWorkflow(String owner, String repo, String workflowId, String ref, Map<String, String> inputs) {
+        String url = apiUrl + "/repos/" + owner + "/" + repo + "/actions/workflows/" + workflowId + "/dispatches";
+
+        Map<String, Object> body = new java.util.HashMap<>();
+        body.put("ref", ref);
+        if (inputs != null && !inputs.isEmpty()) {
+            body.put("inputs", inputs);
+        }
+
+        HttpHeaders headers = new HttpHeaders();
+        if (token != null && !token.isEmpty()) {
+            headers.set("Authorization", "Bearer " + token);
+        }
+        headers.set("Accept", "application/vnd.github.v3+json");
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
+
+        try {
+            restTemplate.exchange(url, HttpMethod.POST, entity, String.class);
+            return "✅ 工作流已触发";
+        } catch (Exception e) {
+            logger.error("触发 GitHub Actions 工作流失败: workflowId={}, ref={}", workflowId, ref, e);
+            throw new RuntimeException("触发工作流失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 获取工作流运行状态
+     * @param owner 仓库所有者
+     * @param repo 仓库名称
+     * @param runId 工作流运行 ID
+     * @return 运行信息
+     */
+    public Map<String, Object> getWorkflowRun(String owner, String repo, int runId) {
+        String url = apiUrl + "/repos/" + owner + "/" + repo + "/actions/runs/" + runId;
+        ResponseEntity<Map> response = executeGet(url, Map.class);
+        return response != null ? response.getBody() : null;
+    }
+
+    /**
+     * 列出最近的工作流运行
+     * @param owner 仓库所有者
+     * @param repo 仓库名称
+     * @param workflowId 工作流 ID 或文件名（可选）
+     * @param limit 返回条数
+     * @return 工作流运行列表
+     */
+    public List<Map<String, Object>> listWorkflowRuns(String owner, String repo, String workflowId, int limit) {
+        String url;
+        if (workflowId != null && !workflowId.isEmpty()) {
+            url = apiUrl + "/repos/" + owner + "/" + repo + "/actions/workflows/" + workflowId + "/runs?per_page=" + limit;
+        } else {
+            url = apiUrl + "/repos/" + owner + "/" + repo + "/actions/runs?per_page=" + limit;
+        }
+
+        HttpHeaders headers = new HttpHeaders();
+        if (token != null && !token.isEmpty()) {
+            headers.set("Authorization", "Bearer " + token);
+        }
+        headers.set("Accept", "application/vnd.github.v3+json");
+
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+
+        try {
+            ResponseEntity<Map> response = restTemplate.exchange(
+                url,
+                HttpMethod.GET,
+                entity,
+                Map.class
+            );
+
+            if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> runs = (List<Map<String, Object>>) response.getBody().get("workflow_runs");
+                return runs;
+            }
+        } catch (Exception e) {
+            logger.error("获取工作流运行列表失败", e);
+        }
+        return null;
+    }
+
+    /**
+     * 取消工作流运行
+     * @param owner 仓库所有者
+     * @param repo 仓库名称
+     * @param runId 工作流运行 ID
+     * @return 取消结果
+     */
+    public String cancelWorkflowRun(String owner, String repo, int runId) {
+        String url = apiUrl + "/repos/" + owner + "/" + repo + "/actions/runs/" + runId + "/cancel";
+
+        HttpHeaders headers = new HttpHeaders();
+        if (token != null && !token.isEmpty()) {
+            headers.set("Authorization", "Bearer " + token);
+        }
+        headers.set("Accept", "application/vnd.github.v3+json");
+
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+
+        try {
+            restTemplate.exchange(url, HttpMethod.POST, entity, String.class);
+            return "✅ 工作流已取消";
+        } catch (Exception e) {
+            logger.error("取消工作流运行失败: runId={}", runId, e);
+            return "❌ 取消失败: " + e.getMessage();
+        }
     }
 }
