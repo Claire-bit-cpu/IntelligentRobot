@@ -413,13 +413,51 @@ public class FeishuClient {
     }
 
     /**
-     * 创建群组
+     * 根据 open_id 获取用户姓名
+     * @param openId 用户 open_id（格式：ou_xxxx）
+     * @return 用户姓名，获取失败返回 openId 本身
+     */
+    @SuppressWarnings("unchecked")
+    public String getUserName(String openId) {
+        if (openId == null || openId.isBlank()) return "新成员";
+
+        ensureToken();
+
+        // 飞书 API：通过 open_id 查询用户，需要指定 user_id_type=open_id
+        String url = apiBaseUrl + "/contact/v3/users/" + openId + "?user_id_type=open_id";
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(tenantAccessToken);
+
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+
+        try {
+            ResponseEntity<Map> response = restTemplate.exchange(url, HttpMethod.GET, entity, Map.class);
+
+            if (response.getStatusCode().is2xxSuccessful()) {
+                Map<String, Object> result = response.getBody();
+                if (result != null && "0".equals(String.valueOf(result.get("code")))) {
+                    Map<String, Object> data = (Map<String, Object>) result.get("data");
+                    Map<String, Object> user = (Map<String, Object>) data.get("user");
+                    String name = (String) user.get("name");
+                    return name != null && !name.isBlank() ? name : openId;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("获取用户姓名失败: openId={}", openId, e);
+        }
+        return openId;
+    }
+
+    /**
+     * 创建群组（批量加入成员）
      *
-     * @param groupName 群组名称
-     * @param creatorOpenId 创建者的 open_id，会自动加入群聊
+     * @param groupName     群组名称
+     * @param memberOpenIds 成员 open_id 列表（包含创建者）
      * @return 创建结果（成功返回 "success"，失败返回原因）
      */
-    public String createGroup(String groupName, String creatorOpenId) {
+    @SuppressWarnings("unchecked")
+    public String createGroup(String groupName, java.util.List<String> memberOpenIds) {
         ensureToken();
 
         String url = apiBaseUrl + "/im/v1/chats";
@@ -432,8 +470,9 @@ public class FeishuClient {
         body.put("name", groupName);
         body.put("chat_mode", "group");
         body.put("chat_type", "public");
-        if (creatorOpenId != null && !creatorOpenId.isEmpty()) {
-            body.put("user_id_list", java.util.List.of(creatorOpenId));
+        // 创建群时直接传入所有成员 open_id（避免单独调用 invite API 需要额外权限）
+        if (memberOpenIds != null && !memberOpenIds.isEmpty()) {
+            body.put("user_id_list", new java.util.ArrayList<>(memberOpenIds));
         }
 
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
@@ -442,31 +481,89 @@ public class FeishuClient {
             ResponseEntity<String> response = restTemplate.postForEntity(url, entity, String.class);
             String responseBody = response.getBody();
             log.info("创建群组API响应: {}", responseBody);
-            log.info("HTTP状态码: {}", response.getStatusCode());
 
             Map<String, Object> result = objectMapper.readValue(responseBody, Map.class);
 
-            // 检查 code
             String code = String.valueOf(result.get("code"));
             String msg = String.valueOf(result.get("msg"));
-            log.info("API返回 code: {}, msg: {}", code, msg);
 
-            // 检查 data 中是否有群组信息
-            Map<String, Object> data = (Map<String, Object>) result.get("data");
-            if (data != null) {
-                String chatId = (String) data.get("chat_id");
-                log.info("创建的群组 chat_id: {}", chatId);
-                if (chatId != null && !chatId.isEmpty()) {
-                    return "success";
-                }
+            if (!"0".equals(code)) {
+                log.error("创建群组失败: code={}, msg={}", code, msg);
+                return "创建失败: " + msg + " (code=" + code + ")";
             }
 
-            // 即使 code 是 0，如果没有 chat_id 也算失败
-            return "创建失败: " + msg + " (code=" + code + ")";
+            Map<String, Object> data = (Map<String, Object>) result.get("data");
+            if (data == null) {
+                return "创建失败: 响应中缺少 data";
+            }
+
+            String chatId = (String) data.get("chat_id");
+            if (chatId == null || chatId.isEmpty()) {
+                return "创建失败: 响应中缺少 chat_id";
+            }
+
+            log.info("群组创建成功: chat_id={}, 群名={}, 成员数={}", chatId, groupName,
+                    memberOpenIds != null ? memberOpenIds.size() : 0);
+
+            return "success";
         } catch (Exception e) {
             log.error("创建群组异常", e);
             return "调用异常: " + e.getMessage();
         }
+    }
+
+    /**
+     * 邀请成员加入群组
+     * API: POST /im/v1/chats/{chat_id}/invite
+     */
+    @SuppressWarnings("unchecked")
+    private String inviteGroupMembers(String chatId, java.util.List<String> memberOpenIds) {
+        String url = apiBaseUrl + "/im/v1/chats/" + chatId + "/invite";
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(tenantAccessToken);
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        // 构建 id_list（飞书 API 要求格式：{"id_list": ["ou_xxx"], "id_type": "open_id"}）
+        java.util.List<String> idList = new java.util.ArrayList<>(memberOpenIds);
+        Map<String, Object> body = Map.of(
+                "id_list", idList,
+                "id_type", "open_id"
+        );
+        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
+
+        try {
+            ResponseEntity<String> response = restTemplate.postForEntity(url, entity, String.class);
+            String responseBody = response.getBody();
+            log.info("邀请成员API响应: {}", responseBody);
+
+            Map<String, Object> result = objectMapper.readValue(responseBody, Map.class);
+            String code = String.valueOf(result.get("code"));
+            if (!"0".equals(code)) {
+                String msg = String.valueOf(result.get("msg"));
+                return "邀请失败: " + msg + " (code=" + code + ")";
+            }
+            log.info("邀请成员成功: chatId={}, 成员数={}", chatId, memberOpenIds.size());
+            return "success";
+        } catch (Exception e) {
+            log.error("邀请成员异常: chatId=" + chatId, e);
+            return "邀请异常: " + e.getMessage();
+        }
+    }
+
+    /**
+     * 创建群组（单创建者版本，兼容旧调用）
+     *
+     * @param groupName      群组名称
+     * @param creatorOpenId  创建者的 open_id
+     * @return 创建结果
+     */
+    public String createGroup(String groupName, String creatorOpenId) {
+        java.util.List<String> members = new java.util.ArrayList<>();
+        if (creatorOpenId != null && !creatorOpenId.isEmpty()) {
+            members.add(creatorOpenId);
+        }
+        return createGroup(groupName, members);
     }
 
     /**
@@ -874,7 +971,7 @@ public class FeishuClient {
 
             // 企业指令
             elements.add(Map.of("tag", "div", "text", Map.of("tag", "lark_md", "content", "**🏢 企业指令**")));
-            elements.add(Map.of("tag", "div", "text", Map.of("tag", "lark_md", "content", "• `/group <群名>` 创建群组\n• `/search <关键词>` 搜索文档\n• `/AI <问题>` AI智能问答")));
+            elements.add(Map.of("tag", "div", "text", Map.of("tag", "lark_md", "content", "• `/group <群名> [@成员]` 创建群组\n• `/search <关键词>` 搜索文档\n• `/AI <问题>` AI智能问答")));
             elements.add(buildButtonGroup(
                     Map.of("action", "help_group"), "👥 建群", "default",
                     Map.of("action", "help_search"), "🔍 搜索", "default",

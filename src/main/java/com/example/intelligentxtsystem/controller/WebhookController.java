@@ -34,6 +34,9 @@ public class WebhookController {
     @Autowired
     private com.example.intelligentxtsystem.client.FeishuClient feishuClient;
 
+    @Autowired
+    private com.example.intelligentxtsystem.service.WelcomeEventHandler welcomeEventHandler;
+
     /**
      * 飞书回调入口（仅接受 POST 请求）
      * 飞书 URL 验证要求：
@@ -75,6 +78,14 @@ public class WebhookController {
 
                 if ("im.message.receive_v1".equals(eventType)) {
                     messageProcessor.processMessageEvent(body);
+                }
+
+                // 新成员入群欢迎事件
+                if (isMemberAddedEvent(eventType)) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> event = (Map<String, Object>) body.get("event");
+                    log.info("收到入群事件: event_type={}, event={}", eventType, event);
+                    welcomeEventHandler.handleMemberAdded(eventType, event);
                 }
 
                 if ("approval.instance.state_change_v4".equals(eventType)) {
@@ -155,6 +166,15 @@ public class WebhookController {
     }
 
     /**
+     * 判断是否为新成员入群事件
+     */
+    private boolean isMemberAddedEvent(String eventType) {
+        return com.example.intelligentxtsystem.service.WelcomeEventHandler.EVENT_USER_ADDED.equals(eventType)
+            || com.example.intelligentxtsystem.service.WelcomeEventHandler.EVENT_BOT_ADDED.equals(eventType)
+            || com.example.intelligentxtsystem.service.WelcomeEventHandler.EVENT_INVITED_V1.equals(eventType);
+    }
+
+    /**
      * 根据 action 值返回对应指令的使用说明
      */
     private String getHelpReply(String actionName) {
@@ -162,7 +182,7 @@ public class WebhookController {
             case "help_weather" -> "🌤 天气查询\n用法：/weather <城市>\n例如：/weather 北京";
             case "help_translate" -> "🌐 翻译\n用法：/translate <文本>\n例如：/translate Hello";
             case "help_schedule" -> "📅 创建日程\n用法：/schedule <时间> <事件>\n例如：/schedule 2024-01-15 15:00 团队会议";
-            case "help_group" -> "👥 创建群组\n用法：/group <群名>\n例如：/group 项目组";
+            case "help_group" -> "👥 创建群组\n用法：/group <群名> [@成员1 @成员2 ...]\n例如：/group 项目组 @小张 @小王";
             case "help_search" -> "🔍 搜索文档\n用法：/search <关键词>\n例如：/search 需求文档";
             case "help_ai" -> "🤖 AI问答\n用法：/AI <问题>\n例如：/AI 如何创建项目";
             case "help_repo" -> "📦 查看仓库\n用法：/repo <owner/repo>\n例如：/repo facebook/react";

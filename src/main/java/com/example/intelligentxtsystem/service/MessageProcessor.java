@@ -10,7 +10,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -46,38 +48,70 @@ public class MessageProcessor {
     @Async("messageExecutor")
     public void processMessageEvent(Map<String, Object> body) {
         try {
-            FeishuCallback callback = objectMapper.convertValue(body, FeishuCallback.class);
-
-            // 消息去重
-            String messageId = callback.getEvent().getMessage().getMessageId();
-            long now = System.currentTimeMillis();
-            Long lastTime = processedMessages.putIfAbsent(messageId, now);
-
-            if (lastTime != null) {
-                if (now - lastTime < dedupWindowMs) {
-                    log.info("消息 {} 已在 {}ms 前处理过，跳过", messageId, now - lastTime);
-                    return;
-                } else {
-                    processedMessages.put(messageId, now);
-                }
+            // 直接从原始 body 解析 content（兼容 content 是 String 或 Map 两种情况）
+            @SuppressWarnings("unchecked")
+            Map<String, Object> eventMap = (Map<String, Object>) body.get("event");
+            if (eventMap == null) {
+                log.warn("event 为空");
+                return;
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> messageMap = (Map<String, Object>) eventMap.get("message");
+            if (messageMap == null) {
+                log.warn("message 为空");
+                return;
             }
 
-            // 清理过期记录
-            processedMessages.entrySet().removeIf(entry -> now - entry.getValue() > dedupCleanupMs);
+            // 解析 content
+            String contentJson;
+            Object contentObj = messageMap.get("content");
+            if (contentObj instanceof String s) {
+                contentJson = s;
+            } else if (contentObj instanceof Map) {
+                contentJson = objectMapper.writeValueAsString(contentObj);
+            } else {
+                log.warn("无法解析 content，类型: {}", contentObj != null ? contentObj.getClass() : "null");
+                return;
+            }
 
-            // 提取消息文本
-            String text = extractText(callback);
-            log.info("收到消息: {}", text);
+            log.info("解析后 content JSON: {}", contentJson);
+
+            MessageContent content = objectMapper.readValue(contentJson, MessageContent.class);
+            String text = content.getText();
+
+            // 从 message.mentions 解析 mentions（飞书将 mentions 放在 message 层级，而非 content 内部）
+            List<MessageContent.Mention> mentions = parseMentions(messageMap);
+
+            log.info("解析后 text: {}, mentions 数量: {}", text,
+                    mentions != null ? mentions.size() : "null");
 
             if (text == null || text.isEmpty()) {
                 return;
             }
 
-            // 分发处理
-            String chatId = callback.getEvent().getMessage().getChatId();
-            String reply = messageDispatcher.dispatch(text, callback.getEvent().getSender(), chatId);
+            // 清洗 text：移除机器人自身的 @_user_N 占位符，确保以 / 开头能被 dispatch 识别
+            String cleanedText = cleanBotMention(text, mentions);
 
-            // 发送回复（支持卡片：以 __CARD__ 前缀标记卡片消息）
+            // 用 FeishuCallback 解析其他字段（messageId、chatId、sender）
+            FeishuCallback callback = objectMapper.convertValue(body, FeishuCallback.class);
+            String messageId = callback.getEvent().getMessage().getMessageId();
+            String chatId = callback.getEvent().getMessage().getChatId();
+
+            // 消息去重
+            long now = System.currentTimeMillis();
+            Long lastTime = processedMessages.putIfAbsent(messageId, now);
+            if (lastTime != null) {
+                if (now - lastTime < dedupWindowMs) {
+                    log.info("消息 {} 已在 {}ms 前处理过，跳过", messageId, now - lastTime);
+                    return;
+                }
+            }
+            processedMessages.entrySet().removeIf(entry -> now - entry.getValue() > dedupCleanupMs);
+
+            // 分发处理（传递 cleanedText 和 mentions）
+            String reply = messageDispatcher.dispatch(cleanedText, callback.getEvent().getSender(), chatId, mentions);
+
+            // 发送回复
             if (reply != null && reply.startsWith("__CARD__")) {
                 String cardJson = reply.substring("__CARD__".length());
                 feishuClient.sendCard(chatId, cardJson);
@@ -90,24 +124,77 @@ public class MessageProcessor {
         }
     }
 
-    private String extractText(FeishuCallback callback) {
+    /**
+     * 从 message.mentions 解析 mention 列表
+     * 飞书将 mentions 放在 message 层级（与 content 同级），而非 content 内部
+     * mentions[].id 是一个对象 {"open_id":"...","union_id":"..."}，需要提取 open_id
+     */
+    @SuppressWarnings("unchecked")
+    private List<MessageContent.Mention> parseMentions(Map<String, Object> messageMap) {
         try {
-            String contentJson = callback.getEvent().getMessage().getContent();
-            log.info("原始消息内容: {}", contentJson);
-
-            MessageContent content = objectMapper.readValue(contentJson, MessageContent.class);
-            String text = content.getText();
-            log.info("解析后消息: {}", text);
-
-            // 移除 @mention 部分（支持 "@机器人 命令" 和 "@机器人命令" 两种格式）
-            if (text != null && text.startsWith("@")) {
-                text = text.replaceFirst("^@[^\\s/]+\\s*", "").trim();
+            Object mentionsObj = messageMap.get("mentions");
+            if (!(mentionsObj instanceof List<?> rawList) || rawList.isEmpty()) {
+                return null;
             }
 
-            return text.isEmpty() ? null : text;
+            return rawList.stream()
+                    .filter(Objects::nonNull)
+                    .map(m -> {
+                        try {
+                            Map<String, Object> mMap = (Map<String, Object>) m;
+                            MessageContent.Mention mention = new MessageContent.Mention();
+                            mention.setKey((String) mMap.get("key"));
+                            mention.setName((String) mMap.get("name"));
+
+                            // id 是对象 {"open_id":"...","union_id":"...","user_id":"..."}
+                            Object idObj = mMap.get("id");
+                            if (idObj instanceof Map<?, ?> idMap) {
+                                String openId = (String) idMap.get("open_id");
+                                mention.setId(openId);
+                            }
+
+                            // mentioned_type: "user" | "bot" | "chat"
+                            String mentionedType = (String) mMap.get("mentioned_type");
+                            mention.setMentionedType(mentionedType);
+
+                            return mention;
+                        } catch (Exception e) {
+                            log.warn("解析单个 mention 失败: {}", m, e);
+                            return null;
+                        }
+                    })
+                    .filter(Objects::nonNull)
+                    .filter(m -> m.getId() != null && !m.getId().isEmpty())
+                    .toList();
         } catch (Exception e) {
-            log.warn("解析消息内容失败", e);
+            log.warn("解析 mentions 失败", e);
             return null;
         }
+    }
+
+    /**
+     * 清洗 text 中的机器人自身 mention 占位符
+     * 例如 "@_user_1 /group B @_user_2" → "/group B @_user_2"
+     * 飞书在消息 text 中会把 @机器人 替换成 @_user_N 占位符，
+     * 需要移除这些占位符，让 text 以 / 开头，以便 dispatch 正确识别指令。
+     */
+    private String cleanBotMention(String text, List<MessageContent.Mention> mentions) {
+        if (text == null) return null;
+        String cleaned = text;
+        if (mentions != null) {
+            for (MessageContent.Mention m : mentions) {
+                if ("bot".equals(m.getMentionedType()) && m.getKey() != null) {
+                    cleaned = cleaned.replace(m.getKey(), "").trim();
+                }
+            }
+        }
+        // 如果清洗后不以 / 开头，尝试找到第一个 / 之后的内容
+        if (!cleaned.startsWith("/")) {
+            int slashIndex = cleaned.indexOf("/");
+            if (slashIndex >= 0) {
+                cleaned = cleaned.substring(slashIndex).trim();
+            }
+        }
+        return cleaned;
     }
 }
