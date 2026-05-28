@@ -1,6 +1,8 @@
 spring:
   application:
     name: IntelligentxtSystem
+  main:
+    allow-circular-references: true
 
 # 高德天气 API Key
 amap:
