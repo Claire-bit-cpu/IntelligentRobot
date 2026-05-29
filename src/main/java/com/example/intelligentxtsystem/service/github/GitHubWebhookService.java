@@ -36,6 +36,9 @@ public class GitHubWebhookService {
     @Autowired(required = false)
     private GitHubClient gitHubClient;
 
+    @Autowired
+    private org.springframework.data.redis.core.StringRedisTemplate redisTemplate;
+
     @Value("${notification.default-chat-ids:}")
     private String defaultChatIds;
 
@@ -56,7 +59,40 @@ public class GitHubWebhookService {
     @SuppressWarnings("unchecked")
     public void handlePushEvent(Map<String, Object> payload) {
         try {
+            // 检查是否是最近通过系统创建的分支（避免重复通知）
+            // CreateBranchCommandHandler 创建分支后会设置 Redis 标记，有效期 60 秒
             String fullName = getStringValue(payload, "repository", "full_name");
+            String branchCreateKey = "branch_create:" + fullName;
+            String marker = redisTemplate.opsForValue().get(branchCreateKey);
+            
+            if (marker != null) {
+                // 存在标记，说明这是系统刚刚创建的分支，跳过通知和代码审查
+                log.info("检测到系统创建的分支推送事件，跳过通知: repository={}", fullName);
+                try {
+                    redisTemplate.delete(branchCreateKey); // 消费掉标记
+                } catch (Exception e) {
+                    log.warn("删除分支创建标记失败", e);
+                }
+                return;
+            }
+
+            // 检查是否是纯分支创建事件（无新提交）
+            // GitHub 在新分支创建时，before 字段为全 0
+            String before = (String) payload.get("before");
+            boolean isNewBranchPush = "0000000000000000000000000000000000000000".equals(before);
+
+            if (isNewBranchPush) {
+                // 新分支创建，检查是否有新提交
+                List<Map<String, Object>> commits = (List<Map<String, Object>>) payload.get("commits");
+                
+                if (commits == null || commits.isEmpty()) {
+                    // 完全没有 commits，肯定是纯分支创建
+                    log.info("忽略纯分支创建事件（无提交）: repository={}", fullName);
+                    return;
+                }
+                
+                log.info("检测到新分支推送，包含 {} 个提交，继续处理", commits.size());
+            }
             String pusherName = getStringValue(payload, "pusher", "name");
             String commitMessage = getStringValue(payload, "head_commit", "message");
             String compareUrl = getStringValue(payload, "compare");

@@ -214,6 +214,15 @@ public class FeishuClient {
      * @param attendeeId  参与者 open_id（可选，为空则不邀请）
      * @return 创建结果
      */
+    /**
+     * 创建日历日程（创建到机器人自己的日历中，可选邀请用户参与）
+     *
+     * @param summary     日程标题
+     * @param startTime   开始时间
+     * @param endTime     结束时间（默认1小时后）
+     * @param attendeeId  参与者 open_id（可选，为空则不邀请）
+     * @return 创建成功返回 eventId，失败返回 null
+     */
     public String createCalendarEventWithAttendee(String summary, LocalDateTime startTime, LocalDateTime endTime, String attendeeId) {
         ensureToken();
 
@@ -222,7 +231,8 @@ public class FeishuClient {
             calendarId = getPrimaryCalendarId();
             log.info("获取到的日历ID: {}", calendarId);
             if (calendarId == null) {
-                return "获取日历失败";
+                log.error("获取日历ID失败，无法创建日程");
+                return null;
             }
         }
 
@@ -238,18 +248,21 @@ public class FeishuClient {
         String eventId = createCalendarEventOnly(summary, startTimestamp, endTimestamp);
         
         if (eventId == null) {
-            return "创建日程失败";
+            log.error("创建日程失败，eventId 为 null");
+            return null;
         }
+
+        log.info("日程创建成功，eventId: {}", eventId);
 
         // 如果有参与者，单独添加
         if (attendeeId != null && !attendeeId.isEmpty()) {
             String addResult = addAttendeeToEvent(eventId, attendeeId);
             if (!"success".equals(addResult)) {
-                log.warn("添加参与者失败，但日程已创建: {}", addResult);
+                log.warn("添加参与者失败，但日程已创建: eventId={}, result={}", eventId, addResult);
             }
         }
 
-        return "success";
+        return eventId;
     }
 
     /**
@@ -303,6 +316,80 @@ public class FeishuClient {
         } catch (Exception e) {
             log.error("创建日程异常", e);
             return null;
+        }
+    }
+
+    /**
+     * 修改日历日程
+     *
+     * @param eventId     日程ID
+     * @param summary     日程标题（可选，null则不修改）
+     * @param startTime   开始时间（可选，null则不修改）
+     * @param endTime     结束时间（可选，null则不修改）
+     * @return 修改结果，"success"表示成功
+     */
+    public String updateCalendarEvent(String eventId, String summary, LocalDateTime startTime, LocalDateTime endTime) {
+        ensureToken();
+
+        if (calendarId == null) {
+            calendarId = getPrimaryCalendarId();
+            if (calendarId == null) {
+                log.error("获取日历ID失败，无法修改日程");
+                return "获取日历失败";
+            }
+        }
+
+        String url = apiBaseUrl + "/calendar/v4/calendars/" + calendarId + "/events/" + eventId;
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(tenantAccessToken);
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        Map<String, Object> body = new java.util.HashMap<>();
+
+        if (summary != null && !summary.isEmpty()) {
+            body.put("summary", summary);
+        }
+
+        if (startTime != null) {
+            long startTimestamp = startTime.atZone(ZoneId.systemDefault()).toEpochSecond();
+            body.put("start_time", Map.of(
+                    "timestamp", String.valueOf(startTimestamp),
+                    "timezone", "Asia/Shanghai"
+            ));
+        }
+
+        if (endTime != null) {
+            long endTimestamp = endTime.atZone(ZoneId.systemDefault()).toEpochSecond();
+            body.put("end_time", Map.of(
+                    "timestamp", String.valueOf(endTimestamp),
+                    "timezone", "Asia/Shanghai"
+            ));
+        }
+
+        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
+
+        try {
+            // 使用 PATCH 方法修改日程
+            org.springframework.http.ResponseEntity<String> response = restTemplate.exchange(
+                    url, org.springframework.http.HttpMethod.PATCH, entity, String.class);
+            String responseBody = response.getBody();
+            log.info("修改日程API响应: {}", responseBody);
+
+            Map<String, Object> result = objectMapper.readValue(responseBody, Map.class);
+
+            if (response.getStatusCode().is2xxSuccessful()) {
+                if (result != null && "0".equals(String.valueOf(result.get("code")))) {
+                    return "success";
+                }
+                String errorMsg = String.valueOf(result.get("msg"));
+                log.error("修改日程失败: code={}, msg={}", result.get("code"), errorMsg);
+                return "修改失败: " + errorMsg;
+            }
+            return "HTTP错误: " + response.getStatusCode() + ", 响应: " + responseBody;
+        } catch (Exception e) {
+            log.error("修改日程异常 eventId={}", eventId, e);
+            return "调用异常: " + e.getMessage();
         }
     }
 
