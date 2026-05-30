@@ -186,6 +186,23 @@ ai:
   # 系统提示词（可选，用于定制 AI 理解行为）
   system-prompt: ${AI_SYSTEM_PROMPT:}
 
+# 任务状态存储配置
+task:
+  status:
+    # 存储方式：memory（内存，单机）/ redis（Redis，集群）
+    store: ${TASK_STATUS_STORE:memory}
+  monitor:
+    # 监控卡片推送的飞书群聊ID（留空则不推送）
+    chat-id: ${TASK_MONITOR_CHAT_ID:}
+    # 推送间隔（毫秒），默认10000（10秒）
+    push-interval-ms: ${TASK_MONITOR_PUSH_INTERVAL_MS:10000}
+  cleanup:
+    # 是否启用自动清理
+    enabled: ${TASK_CLEANUP_ENABLED:true}
+    # 清理 Cron 表达式（默认每5分钟）
+    cron: ${TASK_CLEANUP_CRON:0 0/5 * * * *}
+    # 清理超过 N 分钟的已完成/失败任务（默认60分钟）
+    older-than-minutes: ${TASK_CLEANUP_OLDER_THAN_MINUTES:60}
 
 # 通知配置（群聊配置已迁移到数据库 notification_chat_config 表，支持动态增删）
 # 使用以下接口管理群聊配置：

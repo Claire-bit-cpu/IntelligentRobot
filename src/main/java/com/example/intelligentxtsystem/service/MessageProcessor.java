@@ -210,6 +210,25 @@ public class MessageProcessor {
                 sender.setSenderId("unknown");
             }
 
+            // 如果 taskId 不为空，发送任务开始通知（包含 taskId，方便用户查询进度）
+            if (taskId != null && !taskId.isEmpty()) {
+                String taskStartMsg = String.format(
+                        "⏳ 任务已提交，正在处理中...\n\n" +
+                        "🆔 任务ID: `%s`\n" +
+                        "📊 查询进度: `GET /api/task/%s`\n" +
+                        "💡 稍后将自动回复处理结果",
+                        taskId, taskId
+                );
+                // 发送通知并保存 messageId，用于后续原地更新进度
+                String startMsgId = feishuClient.sendText(chatId, taskStartMsg);
+                if (startMsgId != null) {
+                    AsyncTaskStatus.setMessageId(taskId, startMsgId);
+                    log.info("已发送任务开始通知并保存 messageId: taskId={}, chatId={}, messageId={}", taskId, chatId, startMsgId);
+                } else {
+                    log.warn("任务开始通知发送失败，无法获取 messageId: taskId={}, chatId={}", taskId, chatId);
+                }
+            }
+
             // 分发处理（传递 cleanedText、mentions 和 taskId）
             String reply = messageDispatcher.dispatch(cleanedText, sender, chatId, mentions, taskId);
 
@@ -241,16 +260,68 @@ public class MessageProcessor {
             // ===== 更新任务状态：完成 (100%) =====
             updateMessageTaskProgress(taskId, 100, "回复已发送，任务完成");
 
+            // 标记任务完成并计算耗时
+            if (taskId != null && !taskId.isEmpty()) {
+                try {
+                    AsyncTaskStatus task = AsyncTaskStatus.get(taskId);
+                    if (task != null && task.getCreatedAt() != null) {
+                        long duration = java.time.Duration.between(task.getCreatedAt(), java.time.LocalDateTime.now()).toMillis();
+                        AsyncTaskStatus.setDuration(taskId, duration);
+                    }
+                    AsyncTaskStatus.markCompleted(taskId, "处理成功");
+                    AsyncTaskStatus.appendLog(taskId, "任务完成");
+                    // 最终更新飞书消息为完成状态
+                    updateFeishuMessageFinal(taskId, true, null);
+                } catch (Exception ex) {
+                    log.warn("标记任务完成时出错: taskId={}", taskId, ex);
+                }
+            }
+
         } catch (Exception e) {
             log.error("异步处理消息事件异常: taskId={}", taskId, e);
             // 标记任务失败
             if (taskId != null && !taskId.isEmpty()) {
                 try {
                     AsyncTaskStatus.markFailed(taskId, e.getMessage());
+                    AsyncTaskStatus.appendLog(taskId, "任务失败: " + e.getMessage());
+                    // 更新飞书消息为失败状态
+                    updateFeishuMessageFinal(taskId, false, e.getMessage());
                 } catch (Exception ex) {
                     log.warn("标记任务失败状态时出错: taskId={}", taskId, ex);
                 }
             }
+        }
+    }
+
+    /**
+     * 最终更新飞书消息（任务完成或失败时调用）
+     * @param taskId 任务ID
+     * @param success 是否成功
+     * @param errorMsg 错误信息（失败时）
+     */
+    private void updateFeishuMessageFinal(String taskId, boolean success, String errorMsg) {
+        try {
+            AsyncTaskStatus task = AsyncTaskStatus.get(taskId);
+            if (task == null || task.getMessageId() == null) {
+                return;
+            }
+            StringBuilder sb = new StringBuilder();
+            if (success) {
+                sb.append("✅ 任务完成\n\n");
+                sb.append("🆔 任务ID: `").append(taskId).append("`\n");
+                sb.append("📊 最终进度: 100%\n");
+                if (task.getDurationMs() != null) {
+                    sb.append("⏱ 耗时: ").append(task.getDurationMs()).append("ms\n");
+                }
+            } else {
+                sb.append("❌ 任务失败\n\n");
+                sb.append("🆔 任务ID: `").append(taskId).append("`\n");
+                sb.append("📝 错误: ").append(errorMsg != null ? errorMsg : "未知错误").append("\n");
+            }
+            String contentJson = "{\"text\":\"" + sb.toString().replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"}";
+            feishuClient.updateMessage(task.getMessageId(), contentJson, "text");
+        } catch (Exception e) {
+            log.warn("最终更新飞书消息失败: taskId={}, error={}", taskId, e.getMessage());
         }
     }
 
@@ -276,9 +347,76 @@ public class MessageProcessor {
         }
         try {
             AsyncTaskStatus.updateTaskProgress(taskId, progress, statusMsg);
+            AsyncTaskStatus.appendLog(taskId, statusMsg + " (" + progress + "%)");
+            // 同时更新飞书侧消息（带频率控制，避免飞书API限流）
+            updateFeishuMessageThrottled(taskId, progress, statusMsg);
         } catch (Exception e) {
             log.warn("更新任务进度失败: taskId={}, error={}", taskId, e.getMessage());
         }
+    }
+
+    /**
+     * 飞书消息更新频率控制（内存缓存，key=taskId）
+     * 同一任务最多每 2 秒更新一次飞书消息，避免触发限流
+     */
+    private final ConcurrentHashMap<String, Long> lastFeishuUpdateTime = new ConcurrentHashMap<>();
+    private static final long FEISHU_UPDATE_INTERVAL_MS = 2000; // 2秒
+
+    private void updateFeishuMessageThrottled(String taskId, int progress, String statusMsg) {
+        long now = System.currentTimeMillis();
+        Long lastTime = lastFeishuUpdateTime.get(taskId);
+        if (lastTime != null && (now - lastTime) < FEISHU_UPDATE_INTERVAL_MS) {
+            return; // 距上次更新不足2秒，跳过
+        }
+        // 进度达到关键节点时强制更新（不受频率限制）
+        if (progress >= 100 || progress == 0 || statusMsg.contains("失败")) {
+            // 强制更新，清除时间限制
+        }
+        lastFeishuUpdateTime.put(taskId, now);
+        updateFeishuMessage(taskId, progress, statusMsg);
+        // 任务完成或失败时，清理缓存
+        if (progress >= 100 || statusMsg.contains("失败")) {
+            lastFeishuUpdateTime.remove(taskId);
+        }
+    }
+
+    /**
+     * 更新飞书侧消息（原地更新，不发送新消息）
+     * 通过 updateMessage API 更新之前发送的任务通知消息
+     */
+    private void updateFeishuMessage(String taskId, int progress, String statusMsg) {
+        try {
+            AsyncTaskStatus task = AsyncTaskStatus.get(taskId);
+            if (task == null || task.getMessageId() == null) {
+                return;
+            }
+            // 构建进度文本消息
+            String progressText = buildProgressText(taskId, progress, statusMsg);
+            // content 必须是 JSON 字符串: {"text":"..."}
+            String contentJson = "{\"text\":\"" + progressText.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"}";
+            feishuClient.updateMessage(task.getMessageId(), contentJson, "text");
+        } catch (Exception e) {
+            log.warn("更新飞书消息失败: taskId={}, error={}", taskId, e.getMessage());
+        }
+    }
+
+    /**
+     * 构建进度文本（用于飞书消息更新）
+     */
+    private String buildProgressText(String taskId, int progress, String statusMsg) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("⏳ 任务处理中...\n\n");
+        sb.append("🆔 任务ID: `").append(taskId).append("`\n");
+        sb.append("📊 进度: ").append(progress).append("%\n");
+        sb.append("📝 状态: ").append(statusMsg).append("\n\n");
+        // 进度条
+        int bars = progress / 10;
+        sb.append("[");
+        for (int i = 0; i < 10; i++) {
+            sb.append(i < bars ? "█" : "░");
+        }
+        sb.append("] ").append(progress).append("%\n");
+        return sb.toString();
     }
 
     /**

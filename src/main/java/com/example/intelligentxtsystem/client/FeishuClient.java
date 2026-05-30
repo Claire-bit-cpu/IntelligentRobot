@@ -97,8 +97,9 @@ public class FeishuClient {
     /**
      * 发送文本消息
      * @param receiveId 群ID (oc_xxxx) 或 用户OpenID (ou_xxxx)
+     * @return 消息ID (message_id)，发送失败返回 null
      */
-    public void sendText(String receiveId, String text) {
+    public String sendText(String receiveId, String text) {
         ensureToken();
 
         String url = apiBaseUrl + "/im/v1/messages?receive_id_type=chat_id";
@@ -117,27 +118,41 @@ public class FeishuClient {
         );
 
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
-        restTemplate.postForEntity(url, entity, String.class);
+        try {
+            ResponseEntity<String> response = restTemplate.postForEntity(url, entity, String.class);
+            String responseBody = response.getBody();
+            log.debug("sendText 响应: {}", responseBody);
+            Map<String, Object> result = objectMapper.readValue(responseBody, Map.class);
+            if ("0".equals(String.valueOf(result.get("code")))) {
+                Map<String, Object> data = (Map<String, Object>) result.get("data");
+                if (data != null) {
+                    String messageId = (String) data.get("message_id");
+                    log.info("文本消息发送成功: receiveId={}, messageId={}", receiveId, messageId);
+                    return messageId;
+                }
+            }
+        } catch (Exception e) {
+            log.error("文本消息发送失败: receiveId={}", receiveId, e);
+        }
+        return null;
     }
 
     /**
      * 发送消息卡片（Interactive Card）
      * @param receiveId 接收人 open_id 或群 chat_id
      * @param cardJson   卡片 JSON 字符串（飞书消息卡片格式）
+     * @return 消息ID (message_id)，发送失败返回 null
      */
-    public void sendCard(String receiveId, String cardJson) {
+    public String sendCard(String receiveId, String cardJson) {
         ensureToken();
 
-        String url = apiBaseUrl + "/im/v1/messages?receive_id_type=open_id";
+        // 如果 receiveId 以 "oc_" 开头，则改用 chat_id 模式
+        String receiveIdType = receiveId.startsWith("oc_") ? "chat_id" : "open_id";
+        String url = apiBaseUrl + "/im/v1/messages?receive_id_type=" + receiveIdType;
 
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(tenantAccessToken);
         headers.setContentType(MediaType.APPLICATION_JSON);
-
-        // receive_id_type=open_id 时 receive_id 为 open_id
-        // 如果 receiveId 以 "oc_" 开头，则改用 chat_id 模式
-        String receiveIdType = receiveId.startsWith("oc_") ? "chat_id" : "open_id";
-        String finalUrl = apiBaseUrl + "/im/v1/messages?receive_id_type=" + receiveIdType;
 
         Map<String, Object> body = Map.of(
                 "receive_id", receiveId,
@@ -147,11 +162,58 @@ public class FeishuClient {
 
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
         try {
-            restTemplate.postForEntity(finalUrl, entity, String.class);
-            log.info("消息卡片发送成功: receiveId={}", receiveId);
+            ResponseEntity<String> response = restTemplate.postForEntity(url, entity, String.class);
+            String responseBody = response.getBody();
+            log.debug("sendCard 响应: {}", responseBody);
+            Map<String, Object> result = objectMapper.readValue(responseBody, Map.class);
+            if ("0".equals(String.valueOf(result.get("code")))) {
+                Map<String, Object> data = (Map<String, Object>) result.get("data");
+                if (data != null) {
+                    String messageId = (String) data.get("message_id");
+                    log.info("消息卡片发送成功: receiveId={}, messageId={}", receiveId, messageId);
+                    return messageId;
+                }
+            }
+            log.warn("消息卡片发送未返回 message_id: receiveId={}, response={}", receiveId, responseBody);
+            return null;
         } catch (Exception e) {
             log.error("消息卡片发送失败: receiveId={}", receiveId, e);
-            throw e;
+            return null;
+        }
+    }
+
+    /**
+     * 更新已发送的消息（飞书 API: PUT /im/v1/messages/{message_id}）
+     * 用于在飞书侧原地更新任务进度，而不是发送新消息
+     *
+     * @param messageId  要更新的消息ID（调用 sendText/sendCard 的返回值）
+     * @param contentJson 新的消息内容（JSON 字符串，text类型或卡片）
+     * @param msgType    消息类型："text" 或 "interactive"
+     */
+    public void updateMessage(String messageId, String contentJson, String msgType) {
+        if (messageId == null || messageId.isEmpty()) {
+            log.warn("updateMessage 失败: messageId 为空");
+            return;
+        }
+        ensureToken();
+
+        String url = apiBaseUrl + "/im/v1/messages/" + messageId;
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(tenantAccessToken);
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        Map<String, Object> body = Map.of(
+                "content", contentJson,
+                "msg_type", msgType
+        );
+
+        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
+        try {
+            restTemplate.exchange(url, org.springframework.http.HttpMethod.PUT, entity, String.class);
+            log.debug("消息更新成功: messageId={}", messageId);
+        } catch (Exception e) {
+            log.warn("消息更新失败: messageId={}", messageId, e);
         }
     }
 

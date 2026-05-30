@@ -108,15 +108,33 @@ public class WebhookController {
 
         // ===== 处理加密请求 =====
         String bodyToProcess = rawBody;
-        if (feishuEncryptDecoder != null && feishuEncryptDecoder.isEncrypted(rawBody)) {
+        if (feishuEncryptDecoder != null) {
             try {
-                bodyToProcess = feishuEncryptDecoder.decrypt(rawBody);
-                log.debug("解密后的请求体: {}", bodyToProcess.substring(0, Math.min(200, bodyToProcess.length())));
+                // 先解析请求体，检查是否包含 encrypt 字段
+                Map<String, Object> requestBody = objectMapper.readValue(rawBody, Map.class);
+                
+                if (requestBody.containsKey("encrypt")) {
+                    String encryptData = (String) requestBody.get("encrypt");
+                    if (encryptData == null || encryptData.isEmpty()) {
+                        log.error("encrypt 字段为空");
+                        return ResponseEntity.status(400)
+                                .body(Map.of("code", 400, "msg", "encrypt 字段为空"));
+                    }
+                    
+                    // 解密 encrypt 字段的值（不是整个请求体）
+                    bodyToProcess = feishuEncryptDecoder.decrypt(encryptData);
+                    log.info("请求已解密，原始长度={}, 解密后长度={}", rawBody.length(), bodyToProcess.length());
+                    log.debug("解密后的请求体: {}", bodyToProcess.substring(0, Math.min(200, bodyToProcess.length())));
+                } else {
+                    log.debug("请求未加密，直接使用原始请求体");
+                }
             } catch (Exception e) {
                 log.error("解密失败", e);
                 return ResponseEntity.status(400)
                         .body(Map.of("code", 400, "msg", "解密失败: " + e.getMessage()));
             }
+        } else {
+            log.debug("FeishuEncryptDecoder 未配置，跳过解密");
         }
 
         // ===== 签名验证 =====
