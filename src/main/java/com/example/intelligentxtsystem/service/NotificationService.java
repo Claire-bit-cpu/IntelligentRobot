@@ -1,224 +1,191 @@
 package com.example.intelligentxtsystem.service;
 
-import com.example.intelligentxtsystem.client.FeishuClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
-
 /**
- * 通知发送服务
- * 向配置中的群聊发送通知消息
+ * 统一通知服务（集成去重 + 合并）
+ * 
+ * 功能：
+ * 1. 消息去重（调用 MessageDedupService）
+ * 2. 消息合并（调用 MessageBatchService）
+ * 3. 统一推送入口（所有 DevOps 通知都通过此服务发送）
+ * 
+ * 使用方式：
+ * - 在 JenkinsClient、JiraClient、MonitorClient 等地方，
+ *   用 @Autowired NotificationService 替换直接调用 FeishuClient.sendText()
+ * 
+ * 降噪流程：
+ *   消息来源 → 去重检查 → 合并检查 → 推送 / 暂存
  */
 @Service
 public class NotificationService {
 
     private static final Logger log = LoggerFactory.getLogger(NotificationService.class);
 
+    @Autowired(required = false)
+    private MessageDedupService messageDedupService;
+
+    @Autowired(required = false)
+    private com.example.intelligenttxtsystem.service.MessageBatchService messageBatchService;
+
+    @Autowired(required = false)
+    private com.example.intelligentxtsystem.client.FeishuClient feishuClient;
+
+    /**
+     * 是否启用智能降噪（去重 + 合并），默认 true
+     */
+    @Value("${notification.noise-reduction-enabled:true}")
+    private boolean noiseReductionEnabled;
+
+    /**
+     * 监控群聊 ID（用于任务监控面板）
+     */
+    @Value("${task.monitor.chat-id:}")
+    private String monitorChatId;
+
+    /**
+     * 默认通知群聊 ID 列表（逗号分隔）
+     */
     @Value("${notification.default-chat-ids:}")
     private String defaultChatIds;
 
-    private final FeishuClient feishuClient;
-    private final NotificationConfigService notificationConfigService;
-
-    public NotificationService(FeishuClient feishuClient, NotificationConfigService notificationConfigService) {
-        this.feishuClient = feishuClient;
-        this.notificationConfigService = notificationConfigService;
-    }
-
     /**
-     * 发送通知到所有配置的群聊
-     * @param message 通知内容
+     * 发送通知（带智能降噪）
+     * 
+     * @param chatId    群聊 ID
+     * @param eventType 事件类型（BUILD、DEPLOY、ALERT、JIRA 等）
+     * @param content   消息内容
+     * @return 是否成功推送（true=已推送，false=被降噪拦截或推送失败）
      */
-    public void sendNotification(String message) {
-        // 先从数据库获取启用的群聊
-        List<String> chatIds = notificationConfigService.getEnabledChatIds();
+    public boolean sendNotification(String chatId, String eventType, String content) {
+        if (chatId == null || content == null || content.isEmpty()) {
+            log.warn("通知参数无效: chatId={}, eventType={}", chatId, eventType);
+            return false;
+        }
 
-        // 如果数据库没有配置，使用默认配置
-        if (chatIds.isEmpty() && !defaultChatIds.isEmpty()) {
-            for (String chatId : defaultChatIds.split(",")) {
-                chatId = chatId.trim();
-                if (!chatId.isEmpty()) {
-                    chatIds.add(chatId);
-                }
+        // ===== 第一步：消息去重 =====
+        if (noiseReductionEnabled && messageDedupService != null) {
+            boolean isDup = messageDedupService.isDuplicate(chatId, eventType, content);
+            if (isDup) {
+                log.info("消息已被去重拦截，未推送: chatId={}, eventType={}", 
+                        maskChatId(chatId), eventType);
+                return false; // 重复消息，拦截
             }
         }
 
-        if (chatIds.isEmpty()) {
-            log.warn("没有配置通知群聊，通知未发送: {}", message);
-            return;
-        }
-
-        for (String chatId : chatIds) {
-            try {
-                feishuClient.sendText(chatId, message);
-                log.info("通知已发送到群聊: {}", chatId);
-            } catch (Exception e) {
-                log.error("发送通知失败: chatId={}", chatId, e);
+        // ===== 第二步：消息合并 =====
+        if (noiseReductionEnabled && messageBatchService != null) {
+            String batchSummary = messageBatchService.addToBatch(chatId, eventType, content);
+            if (batchSummary != null) {
+                // 达到合并阈值，推送合并摘要
+                log.info("合并阈值达到，推送合并摘要: chatId={}, eventType={}", 
+                        maskChatId(chatId), eventType);
+                return doSend(chatId, batchSummary);
+            } else {
+                // 未达阈值，消息已加入合并队列，暂不推送
+                log.debug("消息已加入合并队列，暂不推送: chatId={}, eventType={}", 
+                        maskChatId(chatId), eventType);
+                return true; // 加入队列也算"成功"
             }
         }
+
+        // ===== 第三步：直接推送（未启用合并或合并服务不可用）=====
+        return doSend(chatId, content);
     }
 
     /**
-     * 发送通知到指定群聊
-     * @param chatId 群聊ID
-     * @param message 通知内容
+     * 发送通知（强制立即推送，跳过合并队列）
+     * 用于紧急告警（P0 级别）
      */
-    public void sendNotification(String chatId, String message) {
+    public boolean sendUrgentNotification(String chatId, String eventType, String content) {
+        if (chatId == null || content == null || content.isEmpty()) {
+            return false;
+        }
+
+        // 紧急通知也做去重，但不做合并
+        if (noiseReductionEnabled && messageDedupService != null) {
+            boolean isDup = messageDedupService.isDuplicate(chatId, eventType, content);
+            if (isDup) {
+                log.info("紧急通知已被去重拦截: chatId={}, eventType={}", 
+                        maskChatId(chatId), eventType);
+                return false;
+            }
+        }
+
+        return doSend(chatId, content);
+    }
+
+    /**
+     * 发送通知（简化版，使用默认 chatId）
+     * 从配置中读取默认群聊 ID
+     * 
+     * @param content 消息内容
+     * @return 是否成功推送
+     */
+    public boolean sendNotification(String content) {
+        // 使用已注入的 monitorChatId 或 defaultChatIds
+        String defaultChatId = getDefaultChatId();
+        if (defaultChatId == null || defaultChatId.isEmpty()) {
+            log.warn("未配置默认通知群聊 ID，无法发送通知");
+            return false;
+        }
+        
+        // 使用 "SYSTEM" 作为默认事件类型
+        return sendNotification(defaultChatId, "SYSTEM", content);
+    }
+
+    /**
+     * 获取默认群聊 ID
+     */
+    private String getDefaultChatId() {
+        // 优先使用 task.monitor.chat-id（监控群）
+        if (monitorChatId != null && !monitorChatId.isEmpty()) {
+            return monitorChatId;
+        }
+        
+        // 其次使用 notification.default-chat-ids（默认通知群）
+        if (defaultChatIds != null && !defaultChatIds.isEmpty()) {
+            // 取第一个群聊 ID
+            String[] chatIds = defaultChatIds.split(",");
+            return chatIds[0].trim();
+        }
+        
+        return null;
+    }
+
+    /**
+     * 底层发送方法
+     */
+    private boolean doSend(String chatId, String content) {
+        if (feishuClient == null) {
+            log.error("FeishuClient 未注入，无法发送通知");
+            return false;
+        }
+
         try {
-            feishuClient.sendText(chatId, message);
-            log.info("通知已发送到群聊: {}", chatId);
+            String messageId = feishuClient.sendText(chatId, content);
+            if (messageId != null) {
+                log.info("通知推送成功: chatId={}, messageId={}", maskChatId(chatId), messageId);
+                return true;
+            } else {
+                log.warn("通知推送失败: chatId={}", maskChatId(chatId));
+                return false;
+            }
         } catch (Exception e) {
-            log.error("发送通知失败: chatId={}", chatId, e);
-            throw new RuntimeException("发送通知失败", e);
+            log.error("通知推送异常: chatId={}", maskChatId(chatId), e);
+            return false;
         }
     }
 
     /**
-     * 发送格式化通知（支持简单 Markdown）
-     * @param message 通知内容
+     * 脱敏 chatId（日志打印用）
      */
-    public void sendMarkdownNotification(String title, String content) {
-        String markdownText = "# " + title + "\n\n" + content;
-        sendNotification(markdownText);
-    }
-
-    /**
-     * 发送同步成功通知
-     */
-    public void sendSyncSuccessNotification(String syncType, int docCount) {
-        String msg = String.format("""
-                ✅ 索引同步成功
-
-                📊 同步类型：%s
-                📄 索引文档数：%d
-                🕐 时间：%s
-                """, syncType, docCount, java.time.LocalDateTime.now()
-                .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
-        sendNotification(msg);
-    }
-
-    /**
-     * 发送同步失败通知
-     */
-    public void sendSyncFailureNotification(String syncType, String errorMsg) {
-        String msg = String.format("""
-                ❌ 索引同步失败
-
-                📊 同步类型：%s
-                ⚠️ 错误信息：%s
-                🕐 时间：%s
-                """, syncType, errorMsg, java.time.LocalDateTime.now()
-                .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
-        sendNotification(msg);
-    }
-
-    /**
-     * 发送异常预警通知
-     */
-    public void sendExceptionAlert(String title, String detail) {
-        String msg = String.format("""
-                ⚠️ 系统异常预警
-
-                📋 异常类型：%s
-                📄 详情：%s
-                🕐 时间：%s
-                """, title, detail, java.time.LocalDateTime.now()
-                .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
-        sendNotification(msg);
-    }
-
-    /**
-     * 发送文档新增提醒
-     */
-    public void sendDocumentAddedNotification(String docTitle, String docSource, String operator) {
-        String msg = String.format("""
-                📄 文档新增提醒
-
-                📋 文档标题：%s
-                📁 来源：%s
-                👤 操作人：%s
-                🕐 时间：%s
-                """, docTitle, docSource, operator, java.time.LocalDateTime.now()
-                .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
-        sendNotification(msg);
-    }
-
-    /**
-     * 发送文档修改提醒
-     */
-    public void sendDocumentModifiedNotification(String docTitle, String docSource, String operator, String changeDesc) {
-        String msg = String.format("""
-                📝 文档修改提醒
-
-                📋 文档标题：%s
-                📁 来源：%s
-                👤 操作人：%s
-                📄 变更描述：%s
-                🕐 时间：%s
-                """, docTitle, docSource, operator, changeDesc,
-                java.time.LocalDateTime.now()
-                        .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
-        sendNotification(msg);
-    }
-
-    /**
-     * 发送系统维护开始通知
-     */
-    public void sendMaintenanceStartNotification(String maintenanceType, int estimatedMinutes) {
-        String msg = String.format("""
-                🔧 系统维护开始
-
-                📋 维护类型：%s
-                ⏱️ 预计时长：%d 分钟
-                🕐 开始时间：%s
-                """, maintenanceType, estimatedMinutes, java.time.LocalDateTime.now()
-                .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
-        sendNotification(msg);
-    }
-
-    /**
-     * 发送系统维护完成通知
-     */
-    public void sendMaintenanceCompleteNotification(String maintenanceType, int actualMinutes) {
-        String msg = String.format("""
-                ✅ 系统维护完成
-
-                📋 维护类型：%s
-                ⏱️ 实际时长：%d 分钟
-                🕐 完成时间：%s
-                """, maintenanceType, actualMinutes, java.time.LocalDateTime.now()
-                .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
-        sendNotification(msg);
-    }
-
-    /**
-     * 发送待办提醒
-     */
-    public void sendTodoReminder(String todoTitle, String deadline, String assignee) {
-        String msg = String.format("""
-                📌 待办提醒
-
-                📋 待办事项：%s
-                ⏰ 截止时间：%s
-                👤 负责人：%s
-                """, todoTitle, deadline, assignee);
-        sendNotification(msg);
-    }
-
-    /**
-     * 发送会议预约确认
-     */
-    public void sendMeetingConfirmation(String meetingTitle, String timeRange, String attendees) {
-        String msg = String.format("""
-                📅 会议预约确认
-
-                📋 会议主题：%s
-                ⏰ 会议时间：%s
-                👥 参会人员：%s
-                """, meetingTitle, timeRange, attendees);
-        sendNotification(msg);
+    private String maskChatId(String chatId) {
+        if (chatId == null || chatId.length() < 8) return "***";
+        return chatId.substring(0, 4) + "***" + chatId.substring(chatId.length() - 4);
     }
 }

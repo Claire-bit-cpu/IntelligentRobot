@@ -142,17 +142,39 @@ logging:
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level %logger{36} - %msg%n"
 
-# 通知配置
+# 通知配置（智能降噪）
 notification:
   db-path: ${NOTIFICATION_DB_PATH:./notification.db}
   # 默认通知群聊 ID 列表（当数据库无配置时使用，逗号分隔）
   default-chat-ids: ${NOTIFICATION_DEFAULT_CHAT_IDS:}
+  # 是否启用智能降噪（去重 + 合并），默认 true
+  noise-reduction-enabled: ${NOTIFICATION_NOISE_REDUCTION_ENABLED:true}
+
+# 消息去重配置（智能降噪第一步）
+notification.dedup:
+  # 去重窗口时间（秒），默认 300 秒（5 分钟）
+  # 同一 (chatId + eventType + 内容哈希) 在窗口内只推送一次
+  window-seconds: ${NOTIFICATION_DEDUP_WINDOW_SECONDS:300}
+
+# 消息合并配置（智能降噪第二步）
+notification.batch:
+  # 是否启用消息合并，默认 true
+  enabled: ${NOTIFICATION_BATCH_ENABLED:true}
+  # 合并窗口时间（秒），默认 300 秒（5 分钟）
+  # 窗口内的同类消息会被合并为一条摘要推送
+  window-seconds: ${NOTIFICATION_BATCH_WINDOW_SECONDS:300}
+  # 合并阈值，达到此数量立即推送（不等待窗口到期），默认 5
+  threshold: ${NOTIFICATION_BATCH_THRESHOLD:5}
 
 # 搜索引擎配置（SQLite FTS5）
 search:
   index-path: ${SEARCH_INDEX_PATH:./search-index.db}
   sync-interval-ms: ${SEARCH_SYNC_INTERVAL_MS:7200000}  # 全量同步间隔，默认2小时
   max-sync-messages-per-chat: ${SEARCH_MAX_SYNC_MESSAGES:500}  # 每个群聊最多同步消息数
+  # 启动后延迟执行首次同步（毫秒），默认60000（60秒）
+  startup-delay-ms: ${SEARCH_STARTUP_DELAY_MS:60000}
+  # API调用延迟（毫秒），避免频繁调用API，默认100
+  api-call-delay-ms: ${SEARCH_API_CALL_DELAY_MS:100}
   # 指定同步的群聊 ID 列表（为空则不同步任何群聊）
   sync-chat-ids: ${SEARCH_SYNC_CHAT_IDS:auto}
   # 指定同步的知识库空间 ID 列表（为空则不同步任何知识库）
@@ -179,6 +201,8 @@ welcome:
     请输入 /help 查看我能为您提供的服务。
   # 同一群聊两次欢迎的最小间隔（防刷屏）
   cooldown: ${WELCOME_COOLDOWN_MS:30000}
+  # 批量合并窗口（毫秒），在此时间窗口内的入群成员合并为一条消息
+  batch-window-ms: ${WELCOME_BATCH_WINDOW_MS:3000}
 
 # AI 智能理解配置
 ai:
@@ -186,11 +210,26 @@ ai:
   # 系统提示词（可选，用于定制 AI 理解行为）
   system-prompt: ${AI_SYSTEM_PROMPT:}
 
+# 敏感操作二次确认配置
+confirm:
+  # 确认令牌过期时间（秒），默认300（5分钟）
+  token-expire-seconds: ${CONFIRM_TOKEN_EXPIRE_SECONDS:300}
+
+# 上下文管理器配置
+context:
+  # 全局参数 TTL（分钟），用户无活动后自动清理
+  global-param-ttl-minutes: ${CONTEXT_GLOBAL_PARAM_TTL_MINUTES:5}
+
 # 任务状态存储配置
 task:
   status:
     # 存储方式：memory（内存，单机）/ redis（Redis，集群）
     store: ${TASK_STATUS_STORE:memory}
+    # 单任务日志最大长度（字符），超过此长度会截断
+    max-logs-length: ${TASK_STATUS_MAX_LOGS_LENGTH:5000}
+  # 慢任务阈值（毫秒），超过此耗时的任务才推送开始/完成通知
+  # 短耗时任务（如简单查询）不推送通知，避免刷屏
+  slow-threshold-ms: ${TASK_SLOW_THRESHOLD_MS:3000}
   monitor:
     # 监控卡片推送的飞书群聊ID（留空则不推送）
     chat-id: ${TASK_MONITOR_CHAT_ID:}

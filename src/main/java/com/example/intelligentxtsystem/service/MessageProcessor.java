@@ -5,6 +5,7 @@ import com.example.intelligentxtsystem.dto.FeishuCallback;
 import com.example.intelligentxtsystem.dto.FeishuSender;
 import com.example.intelligentxtsystem.dto.MessageContent;
 import com.example.intelligentxtsystem.service.AiUnderstandingService;
+import com.example.intelligentxtsystem.service.ConfirmService;
 import com.example.intelligentxtsystem.task.AsyncTaskStatus;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -47,19 +48,25 @@ public class MessageProcessor {
     @Value("${dedup.cleanup-ms}")
     private long dedupCleanupMs;
 
+    @Value("${task.slow-threshold-ms:3000}")
+    private long slowTaskThresholdMs;
+
     private final ObjectMapper objectMapper;
     private final FeishuClient feishuClient;
     private final MessageDispatcher messageDispatcher;
     private final AiUnderstandingService aiUnderstandingService;
+    private final ConfirmService confirmService;
 
-    public MessageProcessor(ObjectMapper objectMapper, 
-                           FeishuClient feishuClient, 
+    public MessageProcessor(ObjectMapper objectMapper,
+                           FeishuClient feishuClient,
                            MessageDispatcher messageDispatcher,
-                           AiUnderstandingService aiUnderstandingService) {
+                           AiUnderstandingService aiUnderstandingService,
+                           ConfirmService confirmService) {
         this.objectMapper = objectMapper;
         this.feishuClient = feishuClient;
         this.messageDispatcher = messageDispatcher;
         this.aiUnderstandingService = aiUnderstandingService;
+        this.confirmService = confirmService;
     }
 
     /**
@@ -79,6 +86,10 @@ public class MessageProcessor {
      */
     @Async("messageExecutor")
     public void processMessageEvent(Map<String, Object> body, String taskId) {
+        // 提前声明 chatId/messageId，使 catch 块也能访问
+        String chatId = null;
+        String messageId = null;
+
         try {
             // 直接从原始 body 解析 content（兼容 content 是 String 或 Map 两种情况）
             @SuppressWarnings("unchecked")
@@ -97,8 +108,6 @@ public class MessageProcessor {
             // 兼容两种结构：
             // 1. 标准结构：{"header": {...}, "event": {...}}
             // 2. 扁平结构（解密后）：{"event_id": "...", "event_type": "...", "event": {...}}
-            String chatId = null;
-            String messageId = null;
             FeishuCallback callback = null;
             
             try {
@@ -211,24 +220,36 @@ public class MessageProcessor {
             }
 
             // 如果 taskId 不为空，发送任务开始通知（包含 taskId，方便用户查询进度）
+            // 只有慢任务（预计耗时超过阈值）才发送通知，避免简单指令刷屏
             if (taskId != null && !taskId.isEmpty()) {
-                String taskStartMsg = String.format(
-                        "⏳ 任务已提交，正在处理中...\n\n" +
-                        "🆔 任务ID: `%s`\n" +
-                        "📊 查询进度: `GET /api/task/%s`\n" +
-                        "💡 稍后将自动回复处理结果",
-                        taskId, taskId
-                );
-                // 发送通知并保存 messageId，用于后续原地更新进度
-                String startMsgId = feishuClient.sendText(chatId, taskStartMsg);
-                if (startMsgId != null) {
-                    AsyncTaskStatus.setMessageId(taskId, startMsgId);
-                    // 保存 chatId，用于更新失败时发送新消息
-                    AsyncTaskStatus.setChatId(taskId, chatId);
-                    log.info("已发送任务开始通知并保存 messageId: taskId={}, chatId={}, messageId={}", taskId, chatId, startMsgId);
-                } else {
-                    log.warn("任务开始通知发送失败，无法获取 messageId: taskId={}, chatId={}", taskId, chatId);
+                // 先标记任务为"可能慢任务"，后续完成时用实际耗时判断
+                AsyncTaskStatus.setChatId(taskId, chatId);
+                // 默认不发送开始通知，等任务完成时用实际耗时判断
+                log.info("任务已创建，将在完成时根据耗时决定是否推送通知: taskId={}, chatId={}", taskId, chatId);
+            }
+
+            // ===== 处理确认/取消消息（二次确认交互）=====
+            String confirmReply = handleConfirmMessage(text, sender, chatId, taskId);
+            if (confirmReply != null) {
+                feishuClient.sendText(chatId, confirmReply);
+                // 确认消息处理完毕，跳过后续分发
+                updateMessageTaskProgress(taskId, 100, "确认操作处理完成");
+                if (taskId != null && !taskId.isEmpty()) {
+                    // 计算耗时，只有慢任务才推送完成通知
+                    AsyncTaskStatus task = AsyncTaskStatus.get(taskId);
+                    long duration = 0;
+                    if (task != null && task.getCreatedAt() != null) {
+                        duration = java.time.Duration.between(task.getCreatedAt(), java.time.LocalDateTime.now()).toMillis();
+                        AsyncTaskStatus.setDuration(taskId, duration);
+                    }
+                    AsyncTaskStatus.markCompleted(taskId, "确认操作处理完成");
+                    if (duration >= slowTaskThresholdMs) {
+                        sendSlowTaskCompleteNotification(taskId, duration, chatId);
+                    } else {
+                        log.info("确认操作耗时较短({}ms < {}ms)，不推送通知: taskId={}", duration, slowTaskThresholdMs, taskId);
+                    }
                 }
+                return;
             }
 
             // 分发处理（传递 cleanedText、mentions 和 taskId）
@@ -266,14 +287,22 @@ public class MessageProcessor {
             if (taskId != null && !taskId.isEmpty()) {
                 try {
                     AsyncTaskStatus task = AsyncTaskStatus.get(taskId);
+                    long duration = 0;
                     if (task != null && task.getCreatedAt() != null) {
-                        long duration = java.time.Duration.between(task.getCreatedAt(), java.time.LocalDateTime.now()).toMillis();
+                        duration = java.time.Duration.between(task.getCreatedAt(), java.time.LocalDateTime.now()).toMillis();
                         AsyncTaskStatus.setDuration(taskId, duration);
                     }
                     AsyncTaskStatus.markCompleted(taskId, "处理成功");
                     AsyncTaskStatus.appendLog(taskId, "任务完成");
-                    // 最终更新飞书消息为完成状态
-                    updateFeishuMessageFinal(taskId, true, null);
+
+                    // 只有慢任务（耗时超过阈值）才推送完成通知
+                    if (duration >= slowTaskThresholdMs) {
+                        // 慢任务：发送完成通知
+                        sendSlowTaskCompleteNotification(taskId, duration, chatId);
+                    } else {
+                        // 快任务：不推送通知，只清理状态
+                        log.info("任务耗时较短({}ms < {}ms)，不推送完成通知: taskId={}", duration, slowTaskThresholdMs, taskId);
+                    }
                 } catch (Exception ex) {
                     log.warn("标记任务完成时出错: taskId={}", taskId, ex);
                 }
@@ -286,8 +315,18 @@ public class MessageProcessor {
                 try {
                     AsyncTaskStatus.markFailed(taskId, e.getMessage());
                     AsyncTaskStatus.appendLog(taskId, "任务失败: " + e.getMessage());
-                    // 更新飞书消息为失败状态
-                    updateFeishuMessageFinal(taskId, false, e.getMessage());
+
+                    // 计算耗时，只有慢任务才推送失败通知
+                    AsyncTaskStatus task = AsyncTaskStatus.get(taskId);
+                    long duration = 0;
+                    if (task != null && task.getCreatedAt() != null) {
+                        duration = java.time.Duration.between(task.getCreatedAt(), java.time.LocalDateTime.now()).toMillis();
+                    }
+                    if (duration >= slowTaskThresholdMs) {
+                        sendSlowTaskFailedNotification(taskId, e.getMessage(), chatId);
+                    } else {
+                        log.info("任务耗时较短({}ms < {}ms)，不推送失败通知: taskId={}", duration, slowTaskThresholdMs, taskId);
+                    }
                 } catch (Exception ex) {
                     log.warn("标记任务失败状态时出错: taskId={}", taskId, ex);
                 }
@@ -296,53 +335,45 @@ public class MessageProcessor {
     }
 
     /**
-     * 最终更新飞书消息（任务完成或失败时调用）
-     * 如果更新失败（如达到编辑次数上限），自动发送新消息
-     * @param taskId 任务ID
-     * @param success 是否成功
-     * @param errorMsg 错误信息（失败时）
+     * 发送慢任务完成通知（只有耗时超过阈值的任务才调用）
      */
-    private void updateFeishuMessageFinal(String taskId, boolean success, String errorMsg) {
+    private void sendSlowTaskCompleteNotification(String taskId, long duration, String chatId) {
         try {
-            AsyncTaskStatus task = AsyncTaskStatus.get(taskId);
-            if (task == null || task.getMessageId() == null) {
-                return;
-            }
             StringBuilder sb = new StringBuilder();
-            if (success) {
-                sb.append("✅ 任务完成\n\n");
-                sb.append("🆔 任务ID: `").append(taskId).append("`\n");
-                sb.append("📊 最终进度: 100%\n");
-                if (task.getDurationMs() != null) {
-                    sb.append("⏱ 耗时: ").append(task.getDurationMs()).append("ms\n");
-                }
-            } else {
-                sb.append("❌ 任务失败\n\n");
-                sb.append("🆔 任务ID: `").append(taskId).append("`\n");
-                sb.append("📝 错误: ").append(errorMsg != null ? errorMsg : "未知错误").append("\n");
-            }
-            String contentJson = "{\"text\":\"" + sb.toString().replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\"}";
-            
-            // 尝试更新消息
-            boolean updateSuccess = feishuClient.updateMessage(task.getMessageId(), contentJson, "text");
-            if (!updateSuccess) {
-                // 更新失败（可能是编辑次数上限），发送新消息
-                log.info("最终消息更新失败，发送新消息: taskId={}, oldMessageId={}", taskId, task.getMessageId());
-                String chatId = task.getChatId();
-                if (chatId != null) {
-                    String finalText = sb.toString();
-                    String newMessageId = feishuClient.sendText(chatId, finalText);
-                    if (newMessageId != null) {
-                        // 更新任务中的 messageId
-                        AsyncTaskStatus.setMessageId(taskId, newMessageId);
-                        log.info("最终消息已更新为新消息: taskId={}, newMessageId={}", taskId, newMessageId);
-                    }
-                } else {
-                    log.warn("无法获取 chatId，无法发送新消息: taskId={}", taskId);
-                }
+            sb.append("✅ 任务完成\n\n");
+            sb.append("🆔 任务ID: `").append(taskId).append("`\n");
+            sb.append("📊 最终进度: 100%\n");
+            sb.append("⏱ 耗时: ").append(duration).append("ms\n");
+
+            String finalText = sb.toString();
+            String newMessageId = feishuClient.sendText(chatId, finalText);
+            if (newMessageId != null) {
+                AsyncTaskStatus.setMessageId(taskId, newMessageId);
+                log.info("已发送慢任务完成通知: taskId={}, chatId={}, duration={}ms", taskId, chatId, duration);
             }
         } catch (Exception e) {
-            log.warn("最终更新飞书消息失败: taskId={}, error={}", taskId, e.getMessage());
+            log.warn("发送慢任务完成通知失败: taskId={}, error={}", taskId, e.getMessage());
+        }
+    }
+
+    /**
+     * 发送慢任务失败通知（只有耗时超过阈值的任务才调用）
+     */
+    private void sendSlowTaskFailedNotification(String taskId, String errorMsg, String chatId) {
+        try {
+            StringBuilder sb = new StringBuilder();
+            sb.append("❌ 任务失败\n\n");
+            sb.append("🆔 任务ID: `").append(taskId).append("`\n");
+            sb.append("📝 错误: ").append(errorMsg != null ? errorMsg : "未知错误").append("\n");
+
+            String finalText = sb.toString();
+            String newMessageId = feishuClient.sendText(chatId, finalText);
+            if (newMessageId != null) {
+                AsyncTaskStatus.setMessageId(taskId, newMessageId);
+                log.info("已发送慢任务失败通知: taskId={}, chatId={}", taskId, chatId);
+            }
+        } catch (Exception e) {
+            log.warn("发送慢任务失败通知失败: taskId={}, error={}", taskId, e.getMessage());
         }
     }
 
@@ -543,5 +574,82 @@ public class MessageProcessor {
             }
         }
         return cleaned;
+    }
+
+    /**
+     * 处理确认/取消消息（二次确认交互）
+     * 支持以下格式：
+     *   - "确认 <token>"
+     *   - "取消 <token>"
+     *   - "confirm <token>"
+     *   - "cancel <token>"
+     *
+     * @return 回复消息（非 null 表示已处理，调用方应直接发送回复）
+     */
+    private String handleConfirmMessage(String text, FeishuSender sender, String chatId, String taskId) {
+        if (text == null || confirmService == null) return null;
+
+        String trimmed = text.trim();
+        String openId = sender != null ? sender.getOpenId() : null;
+
+        // 匹配：确认 <token> 或 取消 <token>
+        java.util.regex.Pattern confirmPattern = java.util.regex.Pattern.compile("^(确认|confirm)\\s+(\\w+)$", java.util.regex.Pattern.CASE_INSENSITIVE);
+        java.util.regex.Pattern cancelPattern = java.util.regex.Pattern.compile("^(取消|cancel)\\s+(\\w+)$", java.util.regex.Pattern.CASE_INSENSITIVE);
+
+        java.util.regex.Matcher confirmMatcher = confirmPattern.matcher(trimmed);
+        if (confirmMatcher.find()) {
+            String token = confirmMatcher.group(2);
+            log.info("收到确认消息: token={}, openId={}", token, maskOpenId(openId));
+
+            ConfirmService.PendingAction action = confirmService.consume(token, openId, chatId);
+            if (action != null) {
+                log.info("二次确认成功，执行操作: command={}, args={}", action.getCommandName(), action.getArgs());
+                // 直接构造已确认的 CommandContext，执行指令，不再走 --confirm 解析流程
+                com.example.intelligentxtsystem.dto.CommandContext confirmContext =
+                        new com.example.intelligentxtsystem.dto.CommandContext();
+                confirmContext.setCommandName(action.getCommandName());
+                confirmContext.setArgs(action.getArgs());
+                confirmContext.setSender(sender);
+                confirmContext.setChatId(chatId);
+                confirmContext.setConfirmed(true);
+                confirmContext.setConfirmToken(token);
+
+                if (taskId != null && !taskId.isEmpty()) {
+                    com.example.intelligentxtsystem.task.TaskContext.setTaskId(taskId);
+                    com.example.intelligentxtsystem.task.TaskContext.updateProgress(50, "用户已确认，开始执行操作");
+                }
+                try {
+                    Object result = messageDispatcher.getCommandRegistry().execute(action.getCommandName(), confirmContext);
+                    return result != null ? result.toString() : "✅ 操作执行完成";
+                } catch (Exception e) {
+                    log.error("执行确认操作失败: token={}", token, e);
+                    return "❌ 执行确认操作失败: " + e.getMessage();
+                } finally {
+                    com.example.intelligentxtsystem.task.TaskContext.clear();
+                }
+            } else {
+                return "⚠️ 确认令牌无效或已过期。\n💡 确认令牌有效期为 5 分钟，请重新执行操作。";
+            }
+        }
+
+        java.util.regex.Matcher cancelMatcher = cancelPattern.matcher(trimmed);
+        if (cancelMatcher.find()) {
+            String token = cancelMatcher.group(2);
+            log.info("收到取消消息: token={}, openId={}", token, maskOpenId(openId));
+            // 尝试删除待确认操作
+            try {
+                confirmService.consume(token, openId, chatId);
+            } catch (Exception e) {
+                // 忽略
+            }
+            return "✅ 操作已取消。";
+        }
+
+        return null; // 不是确认/取消消息，继续正常分发
+    }
+
+    private String maskOpenId(String openId) {
+        if (openId == null || openId.length() < 8) return "***";
+        return openId.substring(0, 4) + "***" + openId.substring(openId.length() - 4);
     }
 }

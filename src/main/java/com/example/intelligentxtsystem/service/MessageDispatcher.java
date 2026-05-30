@@ -3,9 +3,11 @@ package com.example.intelligentxtsystem.service;
 import com.example.intelligentxtsystem.dto.CommandContext;
 import com.example.intelligentxtsystem.dto.FeishuSender;
 import com.example.intelligentxtsystem.dto.MessageContent;
+import com.example.intelligentxtsystem.service.ConfirmService;
 import com.example.intelligentxtsystem.task.TaskContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PostConstruct;
@@ -29,11 +31,17 @@ public class MessageDispatcher {
     private final CommandRegistry commandRegistry;
     private final FuzzyMatcher fuzzyMatcher;
     private final AiUnderstandingService aiUnderstandingService;
+    private final ConfirmService confirmService;
 
     /**
      * 匹配 /指令名 或 指令名 的正则
      */
     private static final Pattern COMMAND_PATTERN = Pattern.compile("^(?:/)?(\\w+)(.*)$");
+
+    /**
+     * 匹配 --confirm <token> 参数
+     */
+    private static final Pattern CONFIRM_PATTERN = Pattern.compile("--confirm\\s+(\\w+)");
 
     /**
      * 无意义字符检测：连续重复字符或随机字符串（无有意义子串）
@@ -42,10 +50,19 @@ public class MessageDispatcher {
 
     public MessageDispatcher(CommandRegistry commandRegistry,
                             FuzzyMatcher fuzzyMatcher,
-                            AiUnderstandingService aiUnderstandingService) {
+                            AiUnderstandingService aiUnderstandingService,
+                            ConfirmService confirmService) {
         this.commandRegistry = commandRegistry;
         this.fuzzyMatcher = fuzzyMatcher;
         this.aiUnderstandingService = aiUnderstandingService;
+        this.confirmService = confirmService;
+    }
+
+    /**
+     * 获取 CommandRegistry（供 MessageProcessor 执行确认后的指令）
+     */
+    public CommandRegistry getCommandRegistry() {
+        return commandRegistry;
     }
 
     @PostConstruct
@@ -134,6 +151,39 @@ public class MessageDispatcher {
 
         String commandName = matcher.group(1).toLowerCase();
         String args = matcher.group(2).trim();
+
+        // ===== 检查是否带 --confirm <token> 参数 =====
+        java.util.Optional<String> confirmTokenOpt = parseConfirmToken(args);
+        if (confirmTokenOpt.isPresent()) {
+            String token = confirmTokenOpt.get();
+            ConfirmService.PendingAction action = confirmService.consume(token,
+                    sender != null ? sender.getOpenId() : null, chatId);
+            if (action != null) {
+                // 消费成功，以确认的操作参数执行
+                log.info("二次确认成功: token={}, command={}, args={}", token, action.getCommandName(), action.getArgs());
+                CommandContext confirmContext = new CommandContext();
+                confirmContext.setCommandName(action.getCommandName());
+                confirmContext.setArgs(action.getArgs());
+                confirmContext.setSender(sender);
+                confirmContext.setChatId(chatId);
+                confirmContext.setRawMessage(trimmedText);
+                confirmContext.setMentions(mentions);
+                confirmContext.setTaskId(taskId);
+                confirmContext.setConfirmed(true);
+                confirmContext.setConfirmToken(token);
+                try {
+                    Object result = commandRegistry.execute(action.getCommandName(), confirmContext);
+                    return result != null ? result.toString() : null;
+                } catch (Exception e) {
+                    log.error("执行确认操作失败: token={}", token, e);
+                    return "❌ 执行确认操作失败: " + e.getMessage();
+                } finally {
+                    TaskContext.clear();
+                }
+            } else {
+                return "⚠️ 确认令牌无效或已过期，请重新执行操作。\n💡 确认令牌有效期为 5 分钟。";
+            }
+        }
 
         // ===== Level 1：精确匹配 =====
         if (commandRegistry.hasCommand(commandName)) {
@@ -236,5 +286,17 @@ public class MessageDispatcher {
                 "❌ 未知指令: /%s\n\n💡 使用 /help 查看所有可用指令",
                 commandName
         );
+    }
+
+    /**
+     * 从参数中解析 --confirm <token>
+     */
+    private java.util.Optional<String> parseConfirmToken(String args) {
+        if (args == null) return java.util.Optional.empty();
+        java.util.regex.Matcher m = CONFIRM_PATTERN.matcher(args);
+        if (m.find()) {
+            return java.util.Optional.of(m.group(1));
+        }
+        return java.util.Optional.empty();
     }
 }

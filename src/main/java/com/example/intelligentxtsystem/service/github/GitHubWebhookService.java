@@ -7,6 +7,7 @@ package com.example.intelligentxtsystem.service.github;
 import com.example.intelligentxtsystem.client.GitHubClient;
 import com.example.intelligentxtsystem.feishu.FeishuMessageService;
 import com.example.intelligentxtsystem.service.CodeReviewService;
+import com.example.intelligentxtsystem.service.NotificationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,6 +30,9 @@ public class GitHubWebhookService {
 
     @Autowired
     private FeishuMessageService feishuMessageService;
+
+    @Autowired(required = false)
+    private NotificationService notificationService;
 
     @Autowired(required = false)
     private CodeReviewService codeReviewService;
@@ -349,7 +353,8 @@ public class GitHubWebhookService {
     }
 
     /**
-     * 发送通知到配置的群聊
+     * 发送通知到配置的群聊（集成智能降噪）
+     * 使用 NotificationService 进行去重和合并
      */
     private void sendNotification(String message) {
         if (defaultChatIds == null || defaultChatIds.isEmpty()) {
@@ -357,18 +362,51 @@ public class GitHubWebhookService {
             return;
         }
 
+        // 判断事件类型（根据消息内容判断）
+        String eventType = determineEventType(message);
+
         List<String> chatIds = Arrays.asList(defaultChatIds.split(","));
         for (String chatId : chatIds) {
             chatId = chatId.trim();
             if (!chatId.isEmpty()) {
                 try {
-                    feishuMessageService.sendTextToGroup(chatId, message);
-                    log.info("已发送通知到群聊: {}", chatId);
+                    // 优先使用 NotificationService（带智能降噪）
+                    if (notificationService != null) {
+                        boolean success = notificationService.sendNotification(chatId, eventType, message);
+                        if (success) {
+                            log.info("已通过智能降噪服务发送通知到群聊: {}", maskChatId(chatId));
+                        } else {
+                            log.info("通知被智能降噪拦截（去重或合并中）: {}", maskChatId(chatId));
+                        }
+                    } else {
+                        // 降级：直接发送
+                        feishuMessageService.sendTextToGroup(chatId, message);
+                        log.info("已发送通知到群聊（未启用智能降噪）: {}", maskChatId(chatId));
+                    }
                 } catch (Exception e) {
-                    log.error("发送通知到群聊失败: {}", chatId, e);
+                    log.error("发送通知到群聊失败: {}", maskChatId(chatId), e);
                 }
             }
         }
+    }
+
+    /**
+     * 根据消息内容判断事件类型
+     */
+    private String determineEventType(String message) {
+        if (message == null) return "GITHUB";
+        if (message.contains("Push 通知") || message.contains("🚀")) return "GITHUB_PUSH";
+        if (message.contains("PR 通知") || message.contains("🔍")) return "GITHUB_PR";
+        if (message.contains("代码审查")) return "CODE_REVIEW";
+        return "GITHUB";
+    }
+
+    /**
+     * 脱敏 chatId（日志打印用）
+     */
+    private String maskChatId(String chatId) {
+        if (chatId == null || chatId.length() < 8) return "***";
+        return chatId.substring(0, 4) + "***" + chatId.substring(chatId.length() - 4);
     }
 
     /**

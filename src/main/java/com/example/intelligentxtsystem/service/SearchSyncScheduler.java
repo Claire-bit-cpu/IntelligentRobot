@@ -44,6 +44,12 @@ public class SearchSyncScheduler {
     @Value("${search.sync-wiki-space-ids:}")
     private String syncWikiSpaceIdsConfig;
 
+    @Value("${search.startup-delay-ms:60000}")
+    private long startupDelayMs;
+
+    @Value("${search.api-call-delay-ms:100}")
+    private long apiCallDelayMs;
+
     private final AtomicBoolean syncing = new AtomicBoolean(false);
 
     private final NotificationService notificationService;
@@ -66,8 +72,8 @@ public class SearchSyncScheduler {
     @EventListener(ApplicationReadyEvent.class)
     public void onStartup() {
         new Thread(() -> {
-            try {
-                Thread.sleep(60000); // 等待应用完全就绪
+                try {
+                    Thread.sleep(startupDelayMs); // 等待应用完全就绪
                 log.info("启动后首次同步开始（不发送通知）...");
                 fullSyncWithoutNotification();
             } catch (InterruptedException e) {
@@ -398,7 +404,7 @@ public class SearchSyncScheduler {
 
                     // 避免频繁调用 API，添加延迟
                     try {
-                        Thread.sleep(100);
+                        Thread.sleep(apiCallDelayMs);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                     }
@@ -461,7 +467,7 @@ public class SearchSyncScheduler {
 
                 // 避免频繁调用 API，添加延迟
                 try {
-                    Thread.sleep(100);
+                    Thread.sleep(apiCallDelayMs);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
