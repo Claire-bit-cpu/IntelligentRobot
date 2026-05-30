@@ -3,7 +3,7 @@ package com.example.intelligentxtsystem.client;
 import com.example.intelligentxtsystem.dto.CodeReviewResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
@@ -16,26 +16,53 @@ import java.util.Map;
  * 用于翻译等功能
  */
 @Component
+@ConfigurationProperties(prefix = "qianwen")
 public class QwenClient {
 
     private static final Logger logger = LoggerFactory.getLogger(QwenClient.class);
 
-    @Value("${qianyu.api-key}")
     private String apiKey;
-
-    @Value("${qianyu.api-url}")
     private String apiUrl;
-
-    @Value("${qianyu.model}")
     private String model;
-
-    @Value("${qianyu.max-diff-length}")
     private int maxDiffLength;
 
     private final RestTemplate restTemplate;
 
     public QwenClient(RestTemplate restTemplate) {
         this.restTemplate = restTemplate;
+    }
+
+    // Getter 和 Setter
+    public String getApiKey() {
+        return apiKey;
+    }
+
+    public void setApiKey(String apiKey) {
+        this.apiKey = apiKey;
+    }
+
+    public String getApiUrl() {
+        return apiUrl;
+    }
+
+    public void setApiUrl(String apiUrl) {
+        this.apiUrl = apiUrl;
+    }
+
+    public String getModel() {
+        return model;
+    }
+
+    public void setModel(String model) {
+        this.model = model;
+    }
+
+    public int getMaxDiffLength() {
+        return maxDiffLength;
+    }
+
+    public void setMaxDiffLength(int maxDiffLength) {
+        this.maxDiffLength = maxDiffLength;
     }
 
     /**

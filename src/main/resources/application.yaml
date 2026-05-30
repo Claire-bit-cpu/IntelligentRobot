@@ -17,6 +17,28 @@ spring:
           min-idle: ${REDIS_POOL_MIN_IDLE:0}
           max-wait: ${REDIS_POOL_MAX_WAIT:5000}
 
+# 线程池配置（高并发优化）
+thread-pool:
+  high-priority:
+    core-size: 10
+    max-size: 50
+    queue-capacity: 1000
+  low-priority:
+    core-size: 5
+    max-size: 20
+    queue-capacity: 2000
+
+# 限流配置
+ratelimit:
+  global-qps: 1000
+  ip-qps: 100
+  enabled: true
+
+# 幂等性配置
+idempotent:
+  expire-seconds: 86400  # 24小时
+  key-prefix: "feishu:event:idempotent:"
+
 # 高德天气 API Key
 amap:
   key: ${AMAP_KEY:}
@@ -32,11 +54,11 @@ feishu:
   approval-definition-code: ${FEISHU_APPROVAL_DEFINITION_CODE:}
 
 # 通义千问 API
-qianyu:
-  api-key: ${QIANYU_API_KEY:}
-  api-url: ${QIANYU_API_URL:https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation}
-  model: ${QIANYU_MODEL:qwen-turbo}
-  max-diff-length: ${QIANYU_MAX_DIFF_LENGTH:8000}
+qianwen:
+  api-key: ${QIANWEN_API_KEY:}
+  api-url: ${QIANWEN_API_URL:https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation}
+  model: ${QIANWEN_MODEL:qwen-turbo}
+  max-diff-length: ${QIANWEN_MAX_DIFF_LENGTH:8000}
 
 # GitHub 配置
 github:
@@ -88,11 +110,6 @@ fuzzy-match:
 devops:
   ping-timeout-ms: ${DEVOPS_PING_TIMEOUT_MS:5000}
   http-timeout-ms: ${DEVOPS_HTTP_TIMEOUT_MS:5000}
-
-# GitHub Actions 部署配置
-# 用于 /deploy 指令触发 GitHub Actions 工作流
-# 需要配置 github.token 才能使用真实部署功能
-# 注意：此配置块已合并到上方的 github 配置中，避免重复
 
 # JIRA 配置
 jira:
@@ -178,4 +195,3 @@ ai:
 # - DEL  /api/notification/config/chats/{id}    删除群聊配置
 # - POST /api/notification/config/chats/{id}/enable  启用群聊
 # - POST /api/notification/config/chats/{id}/disable 禁用群聊
-
