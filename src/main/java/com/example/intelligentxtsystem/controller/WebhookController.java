@@ -86,7 +86,10 @@ public class WebhookController {
             HttpServletRequest request
     ) {
         long startTime = System.currentTimeMillis();
-        log.info("收到飞书请求: timestamp={}", timestamp);
+        log.info("========== 收到飞书Webhook请求 ==========");
+        log.info("timestamp={}, signature存在={}, body长度={}", 
+                timestamp, signature != null, rawBody != null ? rawBody.length() : 0);
+        log.debug("原始请求体: {}", rawBody);
         
         // 提前声明 taskId，确保在 catch 块中可访问
         String taskId = null;

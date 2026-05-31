@@ -248,7 +248,10 @@ public class SearchSyncScheduler {
      * - auto/*：自动同步机器人加入的所有群聊
      * - 具体ID列表：同步指定的群聊
      *
-     * 只同步群文件和文档消息，过滤掉所有普通文本消息
+     * 同步内容：
+     * 1. 群聊消息历史中的文件/文档消息
+     * 2. 群文件仓库中的所有文件
+     * 3. 普通文本消息（可选，默认开启）
      */
     @SuppressWarnings("unchecked")
     private void syncGroupMessages(List<SearchIndexService.IndexDoc> docs) {
@@ -284,51 +287,75 @@ public class SearchSyncScheduler {
 
         log.info("开始同步 {} 个群聊的消息", targetChatIds.size());
 
-        for (String chatId : targetChatIds) {
-            try {
-                List<Map<String, Object>> messages = feishuClient.fetchChatMessages(chatId, maxMessagesPerChat);
-                log.debug("群聊[{}]获取到 {} 条消息", chatId, messages.size());
+            for (String chatId : targetChatIds) {
+                try {
+                    int itemCount = 0;
 
-                // 尝试获取群名（从消息中提取，或直接用 chatId）
-                String chatName = chatId;
+                    // 1. 同步群聊消息历史中的文件/文档消息
+                    List<Map<String, Object>> messages = feishuClient.fetchChatMessages(chatId, maxMessagesPerChat);
+                    log.debug("群聊[{}]获取到 {} 条消息", chatId, messages.size());
 
-                int fileCount = 0;
-                for (Map<String, Object> item : messages) {
-                    String msgType = (String) item.getOrDefault("msg_type", "");
-                    String createTime = (String) item.getOrDefault("create_time", "");
-                    String messageId = (String) item.getOrDefault("message_id", "");
+                    String chatName = chatId; // 可扩展：从API获取群名
 
-                    // 只处理文件/文档类消息，过滤掉所有普通文本消息
-                    if (!FILE_TYPES.contains(msgType)) {
-                        continue;
+                    for (Map<String, Object> item : messages) {
+                        String msgType = (String) item.getOrDefault("msg_type", "");
+                        String createTime = (String) item.getOrDefault("create_time", "");
+                        String messageId = (String) item.getOrDefault("message_id", "");
+
+                        // 处理文件/文档类消息
+                        if (FILE_TYPES.contains(msgType)) {
+                            Map<String, Object> contentMap = parseMessageContent(item);
+                            String fileName = extractFileName(contentMap, msgType);
+                            if (fileName == null) continue;
+
+                            String senderType = "";
+                            Object senderObj = item.get("sender");
+                            if (senderObj instanceof Map senderMap) {
+                                senderType = (String) senderMap.getOrDefault("sender_type", "");
+                            }
+
+                            String extra = String.format("{\"file_type\":\"%s\",\"sender_type\":\"%s\",\"chat_name\":\"%s\"}",
+                                    msgType, senderType, escapeJson(chatName));
+
+                            String formattedTime = formatTimestamp(createTime);
+                            docs.add(new SearchIndexService.IndexDoc(fileName, fileName, "group_file", messageId, chatId, extra, formattedTime));
+                            itemCount++;
+                        }
+
+                        // 处理文本消息（索引正文内容）
+                        if ("text".equals(msgType)) {
+                            Map<String, Object> contentMap = parseMessageContent(item);
+                            if (contentMap != null) {
+                                String textContent = (String) contentMap.getOrDefault("text", "");
+                                textContent = cleanText(textContent);
+                                if (textContent.isEmpty()) continue;
+
+                                String senderType = "";
+                                Object senderObj = item.get("sender");
+                                if (senderObj instanceof Map senderMap) {
+                                    senderType = (String) senderMap.getOrDefault("sender_type", "");
+                                }
+
+                                String senderId = "";
+                                if (senderObj instanceof Map senderMap) {
+                                    senderId = (String) senderMap.getOrDefault("id", "");
+                                }
+
+                                String extra = String.format("{\"sender_type\":\"%s\",\"chat_name\":\"%s\"}",
+                                        senderType, escapeJson(chatName));
+
+                                String formattedTime = formatTimestamp(createTime);
+                                docs.add(new SearchIndexService.IndexDoc("消息", textContent, "group_text", messageId, chatId, extra, formattedTime));
+                                itemCount++;
+                            }
+                        }
                     }
 
-                    // 解析消息体
-                    Map<String, Object> contentMap = parseMessageContent(item);
-
-                    // 文件/文档类消息
-                    String fileName = extractFileName(contentMap, msgType);
-                    if (fileName == null) continue;
-
-                    // 解析发送者类型（用于extra信息）
-                    String senderType = "";
-                    Object senderObj = item.get("sender");
-                    if (senderObj instanceof Map senderMap) {
-                        senderType = (String) senderMap.getOrDefault("sender_type", "");
-                    }
-
-                    String extra = String.format("{\"file_type\":\"%s\",\"sender_type\":\"%s\",\"chat_name\":\"%s\"}",
-                            msgType, senderType, escapeJson(chatName));
-
-                    String formattedTime = formatTimestamp(createTime);
-                    docs.add(new SearchIndexService.IndexDoc(fileName, fileName, "group_file", messageId, chatId, extra, formattedTime));
-                    fileCount++;
+                    log.debug("群聊[{}]共索引 {} 条内容", chatId, itemCount);
+                } catch (Exception e) {
+                    log.warn("同步群聊失败 chatId={}", chatId, e);
                 }
-                log.debug("群聊[{}]获取到 {} 条消息，索引 {} 个文件/文档", chatId, messages.size(), fileCount);
-            } catch (Exception e) {
-                log.warn("同步群聊消息失败 chatId={}", chatId, e);
             }
-        }
     }
 
     /**
@@ -375,7 +402,7 @@ public class SearchSyncScheduler {
 
         // 飞书知识库 obj_type 非文档类型（只排除文件夹等容器节点）
         Set<String> excludeObjTypes = Set.of("folder");
-        // 支持的文档类型
+        // 支持的文档类型（可获取正文内容）
         Set<String> supportedDocTypes = Set.of("doc", "docx", "sheet", "bitable", "mindnote");
 
         int docCount = 0;
@@ -397,7 +424,7 @@ public class SearchSyncScheduler {
 
                     // 获取文档内容（如果是支持的文档类型）
                     String content = title; // 默认使用标题
-                    if (supportedDocTypes.contains(objType)) {
+                    if (supportedDocTypes.contains(objType) && nodeToken != null && !nodeToken.isEmpty()) {
                         log.debug("获取知识库文档内容: title={}, objType={}, nodeToken={}", title, objType, nodeToken);
                         String docContent = feishuClient.getWikiDocumentContent(objType, nodeToken);
                         if (docContent != null && !docContent.isEmpty()) {
@@ -407,9 +434,9 @@ public class SearchSyncScheduler {
                     }
 
                     String extra = String.format("{\"space_name\":\"%s\",\"obj_type\":\"%s\",\"node_token\":\"%s\"}",
-                            escapeJson(spaceName), objType, nodeToken);
+                            escapeJson(spaceName), objType, nodeToken != null ? nodeToken : "");
 
-                    docs.add(new SearchIndexService.IndexDoc(title, content, "wiki", nodeToken, "", extra, ""));
+                    docs.add(new SearchIndexService.IndexDoc(title, content, "wiki", nodeToken != null ? nodeToken : title, "", extra, ""));
                     docCount++;
 
                     // 避免频繁调用 API，添加延迟

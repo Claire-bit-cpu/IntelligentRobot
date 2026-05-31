@@ -15,8 +15,9 @@ import java.util.Map;
 /**
  * 全局异常处理器
  * 统一处理未捕获异常，避免返回500错误堆栈给调用方
+ * basePackages 限定只拦截业务包，不拦截 Actuator 等框架内部请求
  */
-@RestControllerAdvice
+@RestControllerAdvice(basePackages = "com.example.intelligentxtsystem")
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);

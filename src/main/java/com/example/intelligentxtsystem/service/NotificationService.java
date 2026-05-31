@@ -30,7 +30,7 @@ public class NotificationService {
     private MessageDedupService messageDedupService;
 
     @Autowired(required = false)
-    private com.example.intelligenttxtsystem.service.MessageBatchService messageBatchService;
+    private MessageBatchService messageBatchService;
 
     @Autowired(required = false)
     private com.example.intelligentxtsystem.client.FeishuClient feishuClient;

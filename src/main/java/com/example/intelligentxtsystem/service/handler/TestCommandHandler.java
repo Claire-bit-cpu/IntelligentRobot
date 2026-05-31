@@ -22,7 +22,6 @@ public class TestCommandHandler {
             name = "myid",
             description = "获取你的飞书用户ID",
             usage = "/myid",
-            aliases = {"我的id", "userid"},
             requiresAuth = false
     )
     public String handleMyId(CommandContext context) {

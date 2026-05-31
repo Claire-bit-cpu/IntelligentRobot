@@ -103,7 +103,15 @@ public class FeishuClient {
     public String sendText(String receiveId, String text) {
         ensureToken();
 
-        String url = apiBaseUrl + "/im/v1/messages?receive_id_type=chat_id";
+        // 规范化 receiveId：将 oc: 替换为 oc_（修复格式错误）
+        if (receiveId != null && receiveId.startsWith("oc:")) {
+            receiveId = "oc_" + receiveId.substring(3);
+            log.warn("接收到格式错误的 chatId，已自动修复（oc: → oc_）: {}", receiveId);
+        }
+
+        // 根据 receiveId 格式自动判断类型
+        String receiveIdType = receiveId.startsWith("oc_") ? "chat_id" : "open_id";
+        String url = apiBaseUrl + "/im/v1/messages?receive_id_type=" + receiveIdType;
 
         HttpHeaders headers = new HttpHeaders();
         headers.setBearerAuth(tenantAccessToken);
@@ -131,6 +139,8 @@ public class FeishuClient {
                     log.info("文本消息发送成功: receiveId={}, messageId={}", receiveId, messageId);
                     return messageId;
                 }
+            } else {
+                log.error("文本消息发送失败: receiveId={}, 响应={}", receiveId, responseBody);
             }
         } catch (Exception e) {
             log.error("文本消息发送失败: receiveId={}", receiveId, e);

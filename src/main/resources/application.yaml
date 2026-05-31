@@ -69,12 +69,10 @@ github:
   # 是否启用 Webhook 自动代码审查（push/PR 事件触发）
   webhook:
     auto-review: ${GITHUB_WEBHOOK_AUTO_REVIEW:true}
-  # 仓库别名映射（别名 = owner/repo）
-  repo-aliases:
-    # test是别名
-    test: Claire-bit-cpu/Test
-    frontend: Claire-bit-cpu/frontend-repo
-    backend: Claire-bit-cpu/backend-repo
+  # 仓库别名映射（格式：别名1=owner1/repo1,别名2=owner2/repo2）
+  # 支持通过环境变量 GITHUB_REPO_ALIASES 设置，方便不同部署环境配置不同仓库
+  # 不设置环境变量时，别名列表为空，用户需使用 owner/repo 格式指定仓库
+  repo-aliases: ${GITHUB_REPO_ALIASES:}
   # 写权限白名单（飞书用户 Open ID，逗号分隔）
   # 该用户可以执行合并代码（Merge）、创建 Issue、修改仓库设置等（这些是有风险的操作）
   admin-open-ids: ${GITHUB_ADMIN_OPEN_IDS:}
@@ -131,6 +129,16 @@ grafana:
   api-key: ${GRAFANA_API_KEY:}
   enabled: ${GRAFANA_ENABLED:false}
 
+# Actuator 监控端点配置
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    prometheus:
+      enabled: true
+
 server:
   port: ${SERVER_PORT:8082}
 
@@ -138,7 +146,7 @@ server:
 logging:
   level:
     com.example.intelligentxtsystem.client.FeishuClient: DEBUG
-    com.example.intelligentxtsystem: INFO
+    com.example.intelligentxtsystem: DEBUG
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level %logger{36} - %msg%n"
 
@@ -188,8 +196,8 @@ welcome:
   template: |
     欢迎 {{name}} 加入本群！
 
-    我是飞书智能助手，可以帮助你提升研发效率。
-    请输入 /help 查看我能为您提供的服务。
+    我是飞书智能机器人，可以帮助你提升研发效率。
+    请@我，并输入 /help 查看我能为您提供的服务。
   # 批量入群时合并发送的最小人数
   batch-threshold: ${WELCOME_BATCH_THRESHOLD:2}
   # 批量欢迎消息模板
@@ -197,8 +205,8 @@ welcome:
   batch-template: |
     欢迎新成员加入本群：{{names}}
 
-    我是飞书智能助手，可以帮助你提升研发效率。
-    请输入 /help 查看我能为您提供的服务。
+    我是飞书智能机器人，可以帮助你提升研发效率。
+    请@我，并输入 /help 查看我能为您提供的服务。
   # 同一群聊两次欢迎的最小间隔（防刷屏）
   cooldown: ${WELCOME_COOLDOWN_MS:30000}
   # 批量合并窗口（毫秒），在此时间窗口内的入群成员合并为一条消息

@@ -91,6 +91,18 @@
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-pool2</artifactId>
         </dependency>
+        <!-- Actuator 核心监控端点 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- Prometheus 指标注册表（暴露 /actuator/prometheus） -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
         <!-- TestContainers：集成测试（Redis、PostgreSQL 等） -->
         <!-- 可选依赖：如果需要运行 TestContainers 测试，请确保 Docker 已安装并启动 -->
         <dependency>
