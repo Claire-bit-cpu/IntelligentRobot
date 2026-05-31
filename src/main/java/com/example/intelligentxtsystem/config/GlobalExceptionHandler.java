@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.time.format.DateTimeFormatter;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -42,13 +43,19 @@ public class GlobalExceptionHandler {
             log.error("发送异常预警通知失败", ex);
         }
 
-        return Map.of("code", 500, "msg", "服务器内部错误");
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("code", 500);
+        result.put("msg", "服务器内部错误");
+        return result;
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public Map<String, Object> handleBadRequest(IllegalArgumentException e) {
         log.warn("请求参数错误: {}", e.getMessage());
-        return Map.of("code", 400, "msg", e.getMessage());
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("code", 400);
+        result.put("msg", e.getMessage());
+        return result;
     }
 }
