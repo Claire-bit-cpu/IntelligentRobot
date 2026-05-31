@@ -65,16 +65,30 @@ public class CreateBranchCommandHandler {
 
         String repoAlias = parts[0];
         String branchName = parts[1];
-        String ref = (parts.length >= 3) ? parts[2] : "master";
+        String ref = (parts.length >= 3) ? parts[2] : null;  // 改为 null，稍后动态获取默认分支
 
         String repoFullName = gitHubConfig.getRepoAliasesMap().get(repoAlias);
         if (repoFullName == null) {
             return "❌ 未知的仓库别名：「" + repoAlias + "」\n可用别名：" + gitHubConfig.getRepoAliasesMap().keySet() + "\n💡 请先用 /repo 指令查看可用仓库";
         }
 
+        // 如果用户没有指定源分支，提前获取默认分支用于显示
+        String displayRef = ref;
+        if (displayRef == null) {
+            String[] repoParts = repoFullName.split("/");
+            if (repoParts.length == 2) {
+                displayRef = getDefaultBranch(repoParts[0], repoParts[1]);
+                if (displayRef == null) {
+                    displayRef = "(默认分支)";
+                }
+            } else {
+                displayRef = "(默认分支)";
+            }
+        }
+
         // 二次确认：存储待确认操作
         if (confirmService != null) {
-            String summary = String.format("仓库：%s，新分支：%s，基于：%s", repoFullName, branchName, ref);
+            String summary = String.format("仓库：%s，新分支：%s，基于：%s", repoFullName, branchName, displayRef);
             String token = confirmService.storePendingAction(openId, chatId, "createbranch", args, summary);
             return String.format("""
                     ⚠️ 敏感操作确认
@@ -90,7 +104,7 @@ public class CreateBranchCommandHandler {
 
                     ⏰ 确认令牌有效期：5 分钟
                     💡 如需取消，请忽略此消息
-                    """, repoFullName, branchName, ref, maskOpenId(openId), args, token);
+                    """, repoFullName, branchName, displayRef, maskOpenId(openId), args, token);
         }
 
         // Redis 不可用，直接执行（降级）
@@ -105,7 +119,7 @@ public class CreateBranchCommandHandler {
         String[] parts = args.split("\\s+");
         String repoAlias = parts[0];
         String branchName = parts[1];
-        String ref = (parts.length >= 3) ? parts[2] : "master";
+        String ref = (parts.length >= 3) ? parts[2] : null;  // 改为 null，稍后动态获取
 
         // 先尝试从别名配置中获取，若找不到则尝试直接解析为 owner/repo 格式
         String repoFullName = gitHubConfig.getRepoAliasesMap().get(repoAlias);
@@ -127,6 +141,15 @@ public class CreateBranchCommandHandler {
         String repo = repoParts[1];
 
         try {
+            // 如果用户没有指定源分支，动态获取仓库的默认分支
+            if (ref == null) {
+                ref = getDefaultBranch(owner, repo);
+                if (ref == null) {
+                    return "❌ 无法获取仓库的默认分支，请手动指定源分支\n示例：/createbranch " + repoAlias + " " + branchName + " main";
+                }
+                log.info("自动获取默认分支: {}/{} -> {}", owner, repo, ref);
+            }
+
             // 获取源分支的最新 commit SHA
             String sourceSha = gitHubClient.getBranchSha(owner, repo, ref);
             if (sourceSha == null) {
@@ -164,5 +187,19 @@ public class CreateBranchCommandHandler {
     private String maskOpenId(String openId) {
         if (openId == null || openId.length() < 8) return "***";
         return openId.substring(0, 4) + "***" + openId.substring(openId.length() - 4);
+    }
+
+    /**
+     * 获取仓库的默认分支
+     * @param owner 仓库所有者
+     * @param repo 仓库名称
+     * @return 默认分支名（如 main, master），失败返回 null
+     */
+    private String getDefaultBranch(String owner, String repo) {
+        Map<String, Object> repoInfo = gitHubClient.getRepoInfo(owner, repo);
+        if (repoInfo != null && repoInfo.containsKey("default_branch")) {
+            return (String) repoInfo.get("default_branch");
+        }
+        return null;
     }
 }

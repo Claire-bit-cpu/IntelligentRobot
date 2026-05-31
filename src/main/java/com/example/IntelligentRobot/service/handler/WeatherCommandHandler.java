@@ -59,8 +59,7 @@ public class WeatherCommandHandler {
         }
 
         try {
-            String result = weatherService.getFormattedWeather(city);
-            return result + "\n\n💡 提示：5分钟内再次发送 /weather 会自动复用「" + city + "」";
+            return weatherService.getFormattedWeather(city);
         } catch (Exception e) {
             return "⚠️ 天气查询失败，请稍后再试";
         }
