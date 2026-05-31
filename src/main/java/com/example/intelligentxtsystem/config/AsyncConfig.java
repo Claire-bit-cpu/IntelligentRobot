@@ -1,16 +1,16 @@
 package com.example.intelligentxtsystem.config;
 
-import com.example.intelligentxtsystem.service.AlertService;
-import com.example.intelligentxtsystem.service.ThreadPoolMonitorService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
-import java.util.concurrent.Executor;
+import org.springframework.core.task.TaskExecutor;
+
 import java.util.concurrent.RejectedExecutionHandler;
 import java.util.concurrent.ThreadPoolExecutor;
 
@@ -25,6 +25,7 @@ import java.util.concurrent.ThreadPoolExecutor;
  */
 @Configuration
 @EnableAsync
+@EnableConfigurationProperties(WelcomeConfig.class)
 public class AsyncConfig {
 
     private static final Logger log = LoggerFactory.getLogger(AsyncConfig.class);
@@ -52,7 +53,7 @@ public class AsyncConfig {
      * 处理：消息接收、审批回调、卡片按钮点击等需要快速响应的事件
      */
     @Bean("highPriorityEventExecutor")
-    public Executor highPriorityEventExecutor() {
+    public TaskExecutor highPriorityEventExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         // 核心线程数：根据CPU核心数动态调整，保证快速响应
         int corePoolSize = Runtime.getRuntime().availableProcessors() * 2;
@@ -77,7 +78,7 @@ public class AsyncConfig {
      * 处理：日志上报、数据统计、搜索索引同步等不需要实时响应的事件
      */
     @Bean("lowPriorityEventExecutor")
-    public Executor lowPriorityEventExecutor() {
+    public TaskExecutor lowPriorityEventExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(lowPriorityCoreSize);
         executor.setMaxPoolSize(lowPriorityMaxSize);
@@ -99,7 +100,7 @@ public class AsyncConfig {
      * 实际委托给高优先级线程池
      */
     @Bean("messageExecutor")
-    public Executor messageExecutor() {
+    public TaskExecutor messageExecutor() {
         return highPriorityEventExecutor();
     }
 
@@ -110,25 +111,7 @@ public class AsyncConfig {
     public static class HighPriorityRejectedPolicy implements RejectedExecutionHandler {
         @Override
         public void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
-            // 记录拒绝次数
-            try {
-                ThreadPoolMonitorService monitor = ApplicationContextProvider.getBean(ThreadPoolMonitorService.class);
-                if (monitor != null) {
-                    monitor.recordRejection("high-priority", r.toString());
-                }
-            } catch (Exception e) {
-                log.warn("记录高优先级任务拒绝失败", e);
-            }
-            
-            // 触发告警
-            try {
-                AlertService alertService = ApplicationContextProvider.getBean(AlertService.class);
-                if (alertService != null) {
-                    alertService.sendTaskRejectedAlert("high-priority", r.toString());
-                }
-            } catch (Exception e) {
-                log.warn("发送高优先级任务拒绝告警失败", e);
-            }
+            log.warn("高优先级任务被拒绝: {}", r.toString());
             
             // 执行 CallerRunsPolicy：让提交任务的线程自己执行
             new ThreadPoolExecutor.CallerRunsPolicy().rejectedExecution(r, executor);
@@ -137,21 +120,11 @@ public class AsyncConfig {
 
     /**
      * 低优先级拒绝策略
-     * 记录拒绝次数，使用 DiscardPolicy（静默丢弃）
+     * 使用 DiscardPolicy（静默丢弃）
      */
     public static class LowPriorityRejectedPolicy implements RejectedExecutionHandler {
         @Override
         public void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
-            // 记录拒绝次数
-            try {
-                ThreadPoolMonitorService monitor = ApplicationContextProvider.getBean(ThreadPoolMonitorService.class);
-                if (monitor != null) {
-                    monitor.recordRejection("low-priority", r.toString());
-                }
-            } catch (Exception e) {
-                log.warn("记录低优先级任务拒绝失败", e);
-            }
-            
             // 低优先级任务丢弃，不触发告警（避免告警风暴）
             log.warn("低优先级任务被丢弃: {}", r.toString());
         }

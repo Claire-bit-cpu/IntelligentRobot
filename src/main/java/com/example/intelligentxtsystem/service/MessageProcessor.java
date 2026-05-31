@@ -12,7 +12,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+
+import java.util.List;
 
 import java.util.List;
 import java.util.Map;
@@ -42,11 +46,28 @@ public class MessageProcessor {
 
     private final ConcurrentHashMap<String, Long> processedMessages = new ConcurrentHashMap<>();
 
-    @Value("${dedup.window-ms}")
+    @Value("${dedup.window-ms:30000}")
     private long dedupWindowMs;
 
-    @Value("${dedup.cleanup-ms}")
+    @Value("${dedup.cleanup-ms:600000}")
     private long dedupCleanupMs;
+
+    /**
+     * 定时清理 processedMessages，防止内存泄漏
+     * 每10分钟清理一次超过2倍去重窗口期的记录
+     */
+    @Scheduled(fixedDelay = 600000)
+    public void cleanupProcessedMessages() {
+        long now = System.currentTimeMillis();
+        int before = processedMessages.size();
+        processedMessages.entrySet().removeIf(entry ->
+            now - entry.getValue() > dedupWindowMs * 2
+        );
+        int after = processedMessages.size();
+        if (before != after) {
+            log.debug("清理 processedMessages: {} -> {}", before, after);
+        }
+    }
 
     @Value("${task.slow-threshold-ms:3000}")
     private long slowTaskThresholdMs;

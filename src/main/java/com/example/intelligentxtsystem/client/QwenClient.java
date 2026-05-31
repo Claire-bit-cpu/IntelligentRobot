@@ -95,8 +95,7 @@ public class QwenClient {
             logger.warn("响应格式异常，未找到 output 字段");
             return "⚠️ 翻译结果解析失败";
         } catch (Exception e) {
-            logger.warn("翻译异常: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("翻译异常", e);
             return "⚠️ 翻译服务暂时不可用：" + e.getMessage();
         }
     }

@@ -4,12 +4,14 @@ import com.example.intelligentxtsystem.client.FeishuClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.core.task.TaskExecutor;
 
 import java.time.Instant;
 import java.time.ZoneId;
@@ -54,32 +56,40 @@ public class SearchSyncScheduler {
 
     private final NotificationService notificationService;
 
-    // 文件/文档类消息类型
-    private static final Set<String> FILE_TYPES = Set.of(
-            "file", "doc", "docx", "sheet", "bitable", "wiki", "slides"
-    );
+    private final TaskExecutor lowPriorityEventExecutor;
 
-    public SearchSyncScheduler(FeishuClient feishuClient, SearchIndexService indexService, ObjectMapper objectMapper, NotificationService notificationService) {
+    public SearchSyncScheduler(FeishuClient feishuClient, SearchIndexService indexService, ObjectMapper objectMapper, NotificationService notificationService,
+                             @Qualifier("lowPriorityEventExecutor") TaskExecutor lowPriorityEventExecutor) {
         this.feishuClient = feishuClient;
         this.indexService = indexService;
         this.objectMapper = objectMapper;
         this.notificationService = notificationService;
+        this.lowPriorityEventExecutor = lowPriorityEventExecutor;
     }
+
+    /**
+     * 注入低优先级线程池（用于搜索同步等后台任务）
+     */
+
+    // 文件/文档类消息类型
+    private static final Set<String> FILE_TYPES = Set.of(
+            "file", "doc", "docx", "sheet", "bitable", "wiki", "slides"
+    );
 
     /**
      * 启动后延迟1分钟执行首次同步（不发送通知）
      */
     @EventListener(ApplicationReadyEvent.class)
     public void onStartup() {
-        new Thread(() -> {
-                try {
-                    Thread.sleep(startupDelayMs); // 等待应用完全就绪
+        lowPriorityEventExecutor.execute(() -> {
+            try {
+                Thread.sleep(startupDelayMs); // 等待应用完全就绪
                 log.info("启动后首次同步开始（不发送通知）...");
                 fullSyncWithoutNotification();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
-        }, "search-sync-startup").start();
+        });
     }
 
     /**
@@ -99,13 +109,13 @@ public class SearchSyncScheduler {
         if (!syncing.compareAndSet(false, true)) {
             return false; // 已在同步中
         }
-        new Thread(() -> {
+        lowPriorityEventExecutor.execute(() -> {
             try {
                 fullSync();
             } finally {
                 syncing.set(false);
             }
-        }, "search-sync-manual").start();
+        });
         return true;
     }
 
@@ -185,13 +195,13 @@ public class SearchSyncScheduler {
         if (!syncing.compareAndSet(false, true)) {
             return false; // 已在同步中
         }
-        new Thread(() -> {
+        lowPriorityEventExecutor.execute(() -> {
             try {
                 fullSyncWithoutNotification();
             } finally {
                 syncing.set(false);
             }
-        }, "search-sync-manual").start();
+        });
         return true;
     }
 
