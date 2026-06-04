@@ -66,11 +66,6 @@ public class MessageBatchService {
     private static final String BATCH_QUEUE_PREFIX = "notify:batch:queue:";
 
     /**
-     * Redis Key 前缀（合并摘要缓存，防止窗口内重复推送）
-     */
-    private static final String BATCH_SENT_PREFIX = "notify:batch:sent:";
-
-    /**
      * 添加消息到合并队列
      * 
      * @param chatId    群聊 ID
@@ -89,14 +84,6 @@ public class MessageBatchService {
 
         String safeEventType = eventType != null ? eventType.toUpperCase() : "UNKNOWN";
         String queueKey = buildQueueKey(chatId, safeEventType);
-        String sentKey = buildSentKey(chatId, safeEventType);
-
-        // 检查本窗口内是否已推送过合并摘要（避免重复推送）
-        Boolean alreadySent = redisTemplate.hasKey(sentKey);
-        if (alreadySent != null && alreadySent) {
-            // 已推送过，清理旧队列，开启新窗口
-            redisTemplate.delete(queueKey);
-        }
 
         // 将消息加入队列
         Long size = redisTemplate.opsForList().rightPush(queueKey, content);
@@ -108,9 +95,7 @@ public class MessageBatchService {
         // 达到阈值，立即生成合并摘要并推送
         if (size != null && size >= batchThreshold) {
             String summary = buildBatchSummary(queueKey, safeEventType);
-            // 标记本窗口已推送
-            redisTemplate.opsForValue().set(sentKey, "1", batchWindowSeconds, TimeUnit.SECONDS);
-            // 清空队列
+            // 清空队列（推送后删除，避免重复推送）
             redisTemplate.delete(queueKey);
             return summary;
         }
@@ -158,13 +143,6 @@ public class MessageBatchService {
         String chatId = parts[0];
         String eventType = parts[1];
 
-        // 检查是否已推送过
-        String sentKey = buildSentKey(chatId, eventType);
-        Boolean alreadySent = redisTemplate.hasKey(sentKey);
-        if (alreadySent != null && alreadySent) {
-            return; // 已推送过，跳过
-        }
-
         // 生成合并摘要
         String summary = buildBatchSummary(queueKey, eventType);
 
@@ -179,8 +157,7 @@ public class MessageBatchService {
             }
         }
 
-        // 标记已推送，清空队列
-        redisTemplate.opsForValue().set(sentKey, "1", batchWindowSeconds, TimeUnit.SECONDS);
+        // 推送后删除队列，避免重复推送
         redisTemplate.delete(queueKey);
     }
 
@@ -234,18 +211,6 @@ public class MessageBatchService {
         // 转义 : 为 __COLON__（虽然 chatId 通常不包含 :，但为了安全）
         String safeChatId = chatId.replace(":", "__COLON__");
         return BATCH_QUEUE_PREFIX + safeChatId + ":" + eventType;
-    }
-
-    /**
-     * 构建已推送标记 Redis Key
-     */
-    private String buildSentKey(String chatId, String eventType) {
-        // 规范化 chatId：确保是 oc_ 格式，而不是 oc: 格式
-        if (chatId != null && chatId.startsWith("oc:")) {
-            chatId = "oc_" + chatId.substring(3);
-        }
-        String safeChatId = chatId.replace(":", "__COLON__");
-        return BATCH_SENT_PREFIX + safeChatId + ":" + eventType;
     }
 
     /**

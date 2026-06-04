@@ -157,15 +157,15 @@ logging:
 notification:
   db-path: ${NOTIFICATION_DB_PATH:./notification.db}
   default-chat-ids: ${NOTIFICATION_DEFAULT_CHAT_IDS:}
-  noise-reduction-enabled: true
+  noise-reduction-enabled: false
 
 notification.dedup:
   window-seconds: 300
 
 notification.batch:
   enabled: true
-  window-seconds: 300
-  threshold: 5
+  window-seconds: 600
+  threshold: 3
 
 # 搜索引擎配置
 search:

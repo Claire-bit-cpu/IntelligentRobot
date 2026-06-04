@@ -355,4 +355,173 @@ public class TestNotificationController {
             return "❌ 删除失败：" + e.getMessage();
         }
     }
+
+    // ==================== 消息合并功能演示接口 ====================
+
+    /**
+     * 演示1：发送构建失败通知（会被合并）
+     * 调用3次此接口，第3次会立即推送合并摘要
+     */
+    @GetMapping("/demo/build-failed")
+    public String demoBuildFailed(@RequestParam(defaultValue = "1") int index) {
+        try {
+            String chatId = getDefaultChatId();
+            if (chatId == null) {
+                return "❌ 未配置默认通知群聊 ID";
+            }
+
+            String content = "❌ **构建失败**\n\n" +
+                    "**任务：** login-service #" + index + "\n" +
+                    "**分支：** main\n" +
+                    "**失败原因：** 单元测试失败\n" +
+                    "**时间：** " + java.time.LocalDateTime.now().format(
+                    java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss"));
+
+            notificationService.sendNotification(chatId, "BUILD", content);
+            return "✅ 构建失败通知已发送（" + index + "/3）";
+        } catch (Exception e) {
+            log.error("演示失败", e);
+            return "❌ 演示失败：" + e.getMessage();
+        }
+    }
+
+    /**
+     * 演示2：批量发送多条通知（模拟高频通知场景）
+     * 调用此接口会立即发送5条同类通知
+     */
+    @GetMapping("/demo/batch-test")
+    public String demoBatchTest() {
+        try {
+            String chatId = getDefaultChatId();
+            if (chatId == null) {
+                return "❌ 未配置默认通知群聊 ID";
+            }
+
+            // 发送5条构建通知（超过阈值3，会触发合并）
+            for (int i = 1; i <= 5; i++) {
+                String content = "❌ **构建失败**\n\n" +
+                        "**任务：** " + getServiceName(i) + "\n" +
+                        "**分支：** " + getBranchName(i) + "\n" +
+                        "**失败原因：** " + getFailureReason(i) + "\n" +
+                        "**时间：** " + java.time.LocalDateTime.now().format(
+                        java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss"));
+
+                notificationService.sendNotification(chatId, "BUILD", content);
+
+                // 短暂延迟，模拟真实场景
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+
+            return "✅ 已发送5条构建失败通知，请观察飞书群聊（应该只收到1条合并摘要）";
+        } catch (Exception e) {
+            log.error("演示失败", e);
+            return "❌ 演示失败：" + e.getMessage();
+        }
+    }
+
+    /**
+     * 演示3：发送不同类型的通知（不会合并）
+     */
+    @GetMapping("/demo/mixed-types")
+    public String demoMixedTypes() {
+        try {
+            String chatId = getDefaultChatId();
+            if (chatId == null) {
+                return "❌ 未配置默认通知群聊 ID";
+            }
+
+            // 发送不同类型的通知
+            String[] eventTypes = {"BUILD", "DEPLOY", "ALERT"};
+            String[] messages = {
+                    "❌ **构建失败**\n\n**任务：** login-service",
+                    "✅ **部署成功**\n\n**环境：** production",
+                    "⚠️ **告警通知**\n\n**类型：** CPU 使用率过高"
+            };
+
+            for (int i = 0; i < eventTypes.length; i++) {
+                notificationService.sendNotification(chatId, eventTypes[i], messages[i]);
+            }
+
+            return "✅ 已发送3种不同类型的通知，请观察飞书群聊（应该收到3条独立消息）";
+        } catch (Exception e) {
+            log.error("演示失败", e);
+            return "❌ 演示失败：" + e.getMessage();
+        }
+    }
+
+    /**
+     * 演示4：测试去重功能
+     */
+    @GetMapping("/demo/dedup-test")
+    public String demoDedupTest() {
+        try {
+            String chatId = getDefaultChatId();
+            if (chatId == null) {
+                return "❌ 未配置默认通知群聊 ID";
+            }
+
+            String sameMessage = "⚠️ **测试去重功能**\n\n这是一条完全相同的消息";
+
+            // 第一次发送（应该成功）
+            boolean result1 = notificationService.sendNotification(chatId, "TEST", sameMessage);
+
+            // 立即第二次发送（应该被去重）
+            boolean result2 = notificationService.sendNotification(chatId, "TEST", sameMessage);
+
+            return "✅ 去重测试完成\n" +
+                    "第一次发送：" + (result1 ? "成功" : "失败") + "\n" +
+                    "第二次发送（相同消息）：" + (result2 ? "成功（异常！）" : "已去重（正常）");
+        } catch (Exception e) {
+            log.error("演示失败", e);
+            return "❌ 演示失败：" + e.getMessage();
+        }
+    }
+
+    @Autowired(required = false)
+    private com.example.IntelligentRobot.service.MessageBatchService messageBatchService;
+
+    /**
+     * 手动触发合并消息推送（用于测试定时任务）
+     */
+    @GetMapping("/demo/flush-batches")
+    public String flushBatches() {
+        try {
+            if (messageBatchService == null) {
+                return "❌ MessageBatchService 未注入";
+            }
+            messageBatchService.flushAllBatches();
+            return "✅ 已手动触发合并消息推送，请查看飞书群聊";
+        } catch (Exception e) {
+            log.error("手动触发失败", e);
+            return "❌ 手动触发失败：" + e.getMessage();
+        }
+    }
+
+    /**
+     * 辅助方法：获取服务名称
+     */
+    private String getServiceName(int index) {
+        String[] services = {"login-service", "user-api", "order-service", "payment-service", "gateway-service"};
+        return services[(index - 1) % services.length];
+    }
+
+    /**
+     * 辅助方法：获取分支名称
+     */
+    private String getBranchName(int index) {
+        String[] branches = {"main", "develop", "feature/new-ui", "hotfix/bug-123", "release/v1.0"};
+        return branches[(index - 1) % branches.length];
+    }
+
+    /**
+     * 辅助方法：获取失败原因
+     */
+    private String getFailureReason(int index) {
+        String[] reasons = {"单元测试失败", "编译错误", "依赖下载失败", "超时", "内存溢出"};
+        return reasons[(index - 1) % reasons.length];
+    }
 }
