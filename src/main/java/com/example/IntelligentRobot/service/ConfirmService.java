@@ -47,13 +47,13 @@ public class ConfirmService {
         String token = UUID.randomUUID().toString().substring(0, 8);
         String redisKey = REDIS_PREFIX + token;
 
-        // 格式：openId|chatId|commandName|args|summary
-        String value = String.join("|",
-                openId != null ? openId : "",
-                chatId != null ? chatId : "",
-                commandName,
-                args != null ? args : "",
-                summary != null ? summary : "");
+        // 使用 JSON 格式存储，避免分隔符冲突
+        String value = String.format("{\"openId\":\"%s\",\"chatId\":\"%s\",\"commandName\":\"%s\",\"args\":\"%s\",\"summary\":\"%s\"}",
+                escapeJson(openId != null ? openId : ""),
+                escapeJson(chatId != null ? chatId : ""),
+                escapeJson(commandName),
+                escapeJson(args != null ? args : ""),
+                escapeJson(summary != null ? summary : ""));
 
         if (stringRedisTemplate != null) {
             stringRedisTemplate.opsForValue().set(redisKey, value, expireSeconds, TimeUnit.SECONDS);
@@ -69,7 +69,7 @@ public class ConfirmService {
      * 消费待确认操作（一次性）
      * 只有操作者本人 + 相同 chatId 才能确认
      *
-     * @return 操作信息字符串（openId|chatId|commandName|args|summary），失败返回 null
+     * @return 操作信息，失败返回 null
      */
     public PendingAction consume(String token, String openId, String chatId) {
         if (token == null || token.isEmpty()) return null;
@@ -86,31 +86,77 @@ public class ConfirmService {
             return null;
         }
 
-        // 验证操作者
-        String[] parts = value.split("\\|", 5);
-        if (parts.length < 5) {
-            log.warn("待确认操作数据格式错误: token={}", token);
+        try {
+            // 解析 JSON 格式
+            String storedOpenId = extractJsonField(value, "openId");
+            String storedChatId = extractJsonField(value, "chatId");
+            String commandName = extractJsonField(value, "commandName");
+            String args = extractJsonField(value, "args");
+            String summary = extractJsonField(value, "summary");
+
+            // 校验身份和群聊
+            if (!storedOpenId.equals(openId)) {
+                log.warn("确认操作者不匹配: stored={}, actual={}", maskOpenId(storedOpenId), maskOpenId(openId));
+                return null;
+            }
+            if (!storedChatId.equals(chatId)) {
+                log.warn("确认群聊不匹配: stored={}, actual={}", storedChatId, chatId);
+                return null;
+            }
+
+            // 一次性消费：删除 Key
+            stringRedisTemplate.delete(redisKey);
+
+            return new PendingAction(storedOpenId, storedChatId, commandName, args, summary);
+        } catch (Exception e) {
+            log.error("解析待确认操作数据失败: token={}", token, e);
             stringRedisTemplate.delete(redisKey);
             return null;
         }
+    }
 
-        String storedOpenId = parts[0];
-        String storedChatId = parts[1];
+    /**
+     * 转义 JSON 字符串中的特殊字符
+     */
+    private String escapeJson(String str) {
+        if (str == null) return "";
+        return str.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
+    }
 
-        // 校验身份和群聊
-        if (!storedOpenId.equals(openId)) {
-            log.warn("确认操作者不匹配: stored={}, actual={}", maskOpenId(storedOpenId), maskOpenId(openId));
-            return null;
+    /**
+     * 从简单 JSON 中提取字段值（避免引入 Jackson 依赖）
+     */
+    private String extractJsonField(String json, String fieldName) {
+        String pattern = "\"" + fieldName + "\":\"";
+        int start = json.indexOf(pattern);
+        if (start == -1) return "";
+        start += pattern.length();
+        int end = start;
+        boolean escaped = false;
+        while (end < json.length()) {
+            char c = json.charAt(end);
+            if (escaped) {
+                escaped = false;
+                end++;
+            } else if (c == '\\') {
+                escaped = true;
+                end++;
+            } else if (c == '"') {
+                break;
+            } else {
+                end++;
+            }
         }
-        if (!storedChatId.equals(chatId)) {
-            log.warn("确认群聊不匹配: stored={}, actual={}", storedChatId, chatId);
-            return null;
-        }
-
-        // 一次性消费：删除 Key
-        stringRedisTemplate.delete(redisKey);
-
-        return new PendingAction(storedOpenId, storedChatId, parts[2], parts[3], parts[4]);
+        return json.substring(start, end)
+                .replace("\\\\", "\\")
+                .replace("\\\"", "\"")
+                .replace("\\n", "\n")
+                .replace("\\r", "\r")
+                .replace("\\t", "\t");
     }
 
     /**

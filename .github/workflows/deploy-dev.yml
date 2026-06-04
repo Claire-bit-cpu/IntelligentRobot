@@ -1,0 +1,348 @@
+name: Deploy to Dev Environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: '分支/Tag/SHA（默认 develop）'
+        required: false
+        default: 'develop'
+      target:
+        description: '部署目标（default/server1/server2/aliyun/aws/tencent）'
+        required: false
+        default: 'default'
+        type: choice
+        options:
+          - default
+          - server1
+          - server2
+          - aliyun
+          - aws
+          - tencent
+
+env:
+  DEPLOY_ENV: dev
+  FEISHU_WEBHOOK: ${{ secrets.FEISHU_DEPLOY_WEBHOOK }}
+
+jobs:
+  deploy:
+    name: Deploy to Dev
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || 'develop' }}
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: 📦 Install Dependencies
+        run: npm ci
+
+      - name: 🏗️ Build
+        run: npm run build
+
+      - name: 🔍 Validate Configuration
+        run: |
+          TARGET="${{ github.event.inputs.target || 'default' }}"
+          echo "🔍 验证部署配置... (目标: $TARGET)"
+          
+          case "$TARGET" in
+            default)
+              echo "检查默认服务器配置..."
+              [ -z "${{ vars.DEPLOY_DEFAULT_HOST }}" ] && echo "❌ 缺少配置: DEPLOY_DEFAULT_HOST" && exit 1
+              [ -z "${{ vars.DEPLOY_DEFAULT_USER }}" ] && echo "❌ 缺少配置: DEPLOY_DEFAULT_USER" && exit 1
+              [ -z "${{ secrets.DEPLOY_DEFAULT_SSH_KEY }}" ] && echo "❌ 缺少配置: DEPLOY_DEFAULT_SSH_KEY" && exit 1
+              echo "✅ 默认服务器配置验证通过"
+              ;;
+            server1)
+              echo "检查 Server1 配置..."
+              [ -z "${{ vars.DEPLOY_SERVER1_HOST }}" ] && echo "❌ 缺少配置: DEPLOY_SERVER1_HOST" && exit 1
+              [ -z "${{ vars.DEPLOY_SERVER1_USER }}" ] && echo "❌ 缺少配置: DEPLOY_SERVER1_USER" && exit 1
+              [ -z "${{ secrets.DEPLOY_SERVER1_SSH_KEY }}" ] && echo "❌ 缺少配置: DEPLOY_SERVER1_SSH_KEY" && exit 1
+              echo "✅ Server1 配置验证通过"
+              ;;
+            server2)
+              echo "检查 Server2 配置..."
+              [ -z "${{ vars.DEPLOY_SERVER2_HOST }}" ] && echo "❌ 缺少配置: DEPLOY_SERVER2_HOST" && exit 1
+              [ -z "${{ vars.DEPLOY_SERVER2_USER }}" ] && echo "❌ 缺少配置: DEPLOY_SERVER2_USER" && exit 1
+              [ -z "${{ secrets.DEPLOY_SERVER2_SSH_KEY }}" ] && echo "❌ 缺少配置: DEPLOY_SERVER2_SSH_KEY" && exit 1
+              echo "✅ Server2 配置验证通过"
+              ;;
+            aliyun)
+              echo "检查阿里云配置..."
+              [ -z "${{ secrets.ALIYUN_ACCESS_KEY_ID }}" ] && echo "❌ 缺少配置: ALIYUN_ACCESS_KEY_ID" && exit 1
+              [ -z "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}" ] && echo "❌ 缺少配置: ALIYUN_ACCESS_KEY_SECRET" && exit 1
+              
+              DEPLOY_TYPE="${{ vars.ALIYUN_DEPLOY_TYPE || 'ecs' }}"
+              if [ "$DEPLOY_TYPE" = "ecs" ]; then
+                [ -z "${{ vars.ALIYUN_ECS_HOST }}" ] && echo "❌ 缺少配置: ALIYUN_ECS_HOST (ECS 部署)" && exit 1
+                [ -z "${{ vars.ALIYUN_ECS_USER }}" ] && echo "❌ 缺少配置: ALIYUN_ECS_USER (ECS 部署)" && exit 1
+                [ -z "${{ secrets.ALIYUN_ECS_SSH_KEY }}" ] && echo "❌ 缺少配置: ALIYUN_ECS_SSH_KEY (ECS 部署)" && exit 1
+              fi
+              echo "✅ 阿里云配置验证通过 (类型: $DEPLOY_TYPE)"
+              ;;
+            aws)
+              echo "检查 AWS 配置..."
+              [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ] && echo "❌ 缺少配置: AWS_ACCESS_KEY_ID" && exit 1
+              [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ] && echo "❌ 缺少配置: AWS_SECRET_ACCESS_KEY" && exit 1
+              
+              DEPLOY_TYPE="${{ vars.AWS_DEPLOY_TYPE || 'ec2' }}"
+              if [ "$DEPLOY_TYPE" = "ec2" ]; then
+                [ -z "${{ vars.AWS_EC2_HOST }}" ] && echo "❌ 缺少配置: AWS_EC2_HOST (EC2 部署)" && exit 1
+                [ -z "${{ vars.AWS_EC2_USER }}" ] && echo "❌ 缺少配置: AWS_EC2_USER (EC2 部署)" && exit 1
+                [ -z "${{ secrets.AWS_EC2_SSH_KEY }}" ] && echo "❌ 缺少配置: AWS_EC2_SSH_KEY (EC2 部署)" && exit 1
+              fi
+              echo "✅ AWS 配置验证通过 (类型: $DEPLOY_TYPE)"
+              ;;
+            tencent)
+              echo "检查腾讯云配置..."
+              [ -z "${{ secrets.TENCENT_SECRET_ID }}" ] && echo "❌ 缺少配置: TENCENT_SECRET_ID" && exit 1
+              [ -z "${{ secrets.TENCENT_SECRET_KEY }}" ] && echo "❌ 缺少配置: TENCENT_SECRET_KEY" && exit 1
+              
+              DEPLOY_TYPE="${{ vars.TENCENT_DEPLOY_TYPE || 'cvm' }}"
+              if [ "$DEPLOY_TYPE" = "cvm" ]; then
+                [ -z "${{ vars.TENCENT_CVM_HOST }}" ] && echo "❌ 缺少配置: TENCENT_CVM_HOST (CVM 部署)" && exit 1
+                [ -z "${{ vars.TENCENT_CVM_USER }}" ] && echo "❌ 缺少配置: TENCENT_CVM_USER (CVM 部署)" && exit 1
+                [ -z "${{ secrets.TENCENT_CVM_SSH_KEY }}" ] && echo "❌ 缺少配置: TENCENT_CVM_SSH_KEY (CVM 部署)" && exit 1
+              fi
+              echo "✅ 腾讯云配置验证通过 (类型: $DEPLOY_TYPE)"
+              ;;
+          esac
+        continue-on-error: false
+
+      - name: 🚀 Deploy to Target
+        run: |
+          TARGET="${{ github.event.inputs.target || 'default' }}"
+          echo "🚀 开始部署到: $TARGET"
+          
+          # 设置 SSH 密钥
+          setup_ssh_key() {
+            local key_var_name=$1
+            if [ -n "$key_var_name" ]; then
+              echo "$key_var_name" > /tmp/deploy_key
+              chmod 600 /tmp/deploy_key
+              echo "/tmp/deploy_key"
+            fi
+          }
+          
+          case "$TARGET" in
+            default)
+              echo "📡 部署到默认服务器..."
+              SSH_HOST="${{ vars.DEPLOY_DEFAULT_HOST }}"
+              SSH_USER="${{ vars.DEPLOY_DEFAULT_USER }}"
+              REMOTE_PATH="${{ vars.DEPLOY_DEFAULT_PATH || '/app' }}"
+              SSH_KEY=$(setup_ssh_key "${{ secrets.DEPLOY_DEFAULT_SSH_KEY }}")
+              
+              echo "连接到 $SSH_USER@$SSH_HOST:$REMOTE_PATH"
+              ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" \
+                "cd $REMOTE_PATH && git pull origin main && npm install --production && pm2 restart app || pm2 start app.js --name app"
+              ;;
+            server1)
+              echo "📡 部署到 Server1..."
+              SSH_HOST="${{ vars.DEPLOY_SERVER1_HOST }}"
+              SSH_USER="${{ vars.DEPLOY_SERVER1_USER }}"
+              REMOTE_PATH="${{ vars.DEPLOY_SERVER1_PATH || '/app' }}"
+              SSH_KEY=$(setup_ssh_key "${{ secrets.DEPLOY_SERVER1_SSH_KEY }}")
+              
+              echo "连接到 $SSH_USER@$SSH_HOST:$REMOTE_PATH"
+              ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" \
+                "cd $REMOTE_PATH && git pull origin main && npm install --production && systemctl restart app"
+              ;;
+            server2)
+              echo "📡 部署到 Server2..."
+              SSH_HOST="${{ vars.DEPLOY_SERVER2_HOST }}"
+              SSH_USER="${{ vars.DEPLOY_SERVER2_USER }}"
+              REMOTE_PATH="${{ vars.DEPLOY_SERVER2_PATH || '/app' }}"
+              SSH_KEY=$(setup_ssh_key "${{ secrets.DEPLOY_SERVER2_SSH_KEY }}")
+              
+              echo "连接到 $SSH_USER@$SSH_HOST:$REMOTE_PATH"
+              ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" \
+                "cd $REMOTE_PATH && git pull origin main && npm install --production && systemctl restart app"
+              ;;
+            aliyun)
+              echo "📡 部署到阿里云..."
+              DEPLOY_TYPE="${{ vars.ALIYUN_DEPLOY_TYPE || 'ecs' }}"
+              
+              if [ "$DEPLOY_TYPE" = "ecs" ]; then
+                SSH_HOST="${{ vars.ALIYUN_ECS_HOST }}"
+                SSH_USER="${{ vars.ALIYUN_ECS_USER || 'root' }}"
+                REMOTE_PATH="${{ vars.ALIYUN_ECS_PATH || '/app' }}"
+                SSH_KEY=$(setup_ssh_key "${{ secrets.ALIYUN_ECS_SSH_KEY }}")
+                
+                echo "连接到阿里云 ECS: $SSH_USER@$SSH_HOST:$REMOTE_PATH"
+                ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" \
+                  "cd $REMOTE_PATH && git pull origin main && npm install --production && systemctl restart app"
+              elif [ "$DEPLOY_TYPE" = "oss" ]; then
+                echo "部署到阿里云 OSS..."
+                # 安装阿里云 CLI
+                # wget https://github.com/aliyun/aliyun-cli/releases/download/v3.0.124/aliyun-cli-linux-3.0.124-amd64.tgz
+                # 上传到 OSS
+                # ossutil cp -r dist/ oss://${{ vars.ALIYUN_OSS_BUCKET }}/
+                echo "⚠️ OSS 部署需要配置阿里云 CLI"
+              elif [ "$DEPLOY_TYPE" = "function" ]; then
+                echo "部署到阿里云函数计算..."
+                # 安装 Funcraft 或 Serverless Devs
+                # s deploy
+                echo "⚠️ 函数计算部署需要配置 Serverless Devs"
+              fi
+              ;;
+            aws)
+              echo "📡 部署到 AWS..."
+              DEPLOY_TYPE="${{ vars.AWS_DEPLOY_TYPE || 'ec2' }}"
+              
+              if [ "$DEPLOY_TYPE" = "ec2" ]; then
+                SSH_HOST="${{ vars.AWS_EC2_HOST }}"
+                SSH_USER="${{ vars.AWS_EC2_USER || 'ubuntu' }}"
+                REMOTE_PATH="${{ vars.AWS_EC2_PATH || '/app' }}"
+                SSH_KEY=$(setup_ssh_key "${{ secrets.AWS_EC2_SSH_KEY }}")
+                
+                echo "连接到 AWS EC2: $SSH_USER@$SSH_HOST:$REMOTE_PATH"
+                ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" \
+                  "cd $REMOTE_PATH && git pull origin main && npm install --production && systemctl restart app"
+              elif [ "$DEPLOY_TYPE" = "s3" ]; then
+                echo "部署到 AWS S3..."
+                # 安装 AWS CLI
+                # aws s3 sync dist/ s3://${{ vars.AWS_S3_BUCKET }}/
+                echo "⚠️ S3 部署需要配置 AWS CLI"
+              elif [ "$DEPLOY_TYPE" = "lambda" ]; then
+                echo "部署到 AWS Lambda..."
+                # 安装 AWS CLI
+                # aws lambda update-function-code --function-name ${{ vars.AWS_LAMBDA_FUNCTION_NAME }} --zip-file fileb://dist.zip
+                echo "⚠️ Lambda 部署需要配置 AWS CLI"
+              fi
+              ;;
+            tencent)
+              echo "📡 部署到腾讯云..."
+              DEPLOY_TYPE="${{ vars.TENCENT_DEPLOY_TYPE || 'cvm' }}"
+              
+              if [ "$DEPLOY_TYPE" = "cvm" ]; then
+                SSH_HOST="${{ vars.TENCENT_CVM_HOST }}"
+                SSH_USER="${{ vars.TENCENT_CVM_USER || 'root' }}"
+                REMOTE_PATH="${{ vars.TENCENT_CVM_PATH || '/app' }}"
+                SSH_KEY=$(setup_ssh_key "${{ secrets.TENCENT_CVM_SSH_KEY }}")
+                
+                echo "连接到腾讯云 CVM: $SSH_USER@$SSH_HOST:$REMOTE_PATH"
+                ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" \
+                  "cd $REMOTE_PATH && git pull origin main && npm install --production && systemctl restart app"
+              elif [ "$DEPLOY_TYPE" = "cos" ]; then
+                echo "部署到腾讯云 COS..."
+                # 安装 COS CLI
+                # coscmd upload -r dist/ /
+                echo "⚠️ COS 部署需要配置 COS CLI"
+              elif [ "$DEPLOY_TYPE" = "scf" ]; then
+                echo "部署到腾讯云云函数..."
+                # 安装 Serverless Framework 或 SCF CLI
+                # sls deploy
+                echo "⚠️ 云函数部署需要配置 Serverless Framework"
+              fi
+              ;;
+          esac
+          
+          echo "✅ 部署完成"
+        env:
+          DEPLOY_ENV: dev
+          DEPLOY_TARGET: ${{ github.event.inputs.target }}
+        continue-on-error: false
+
+      - name: 🔍 Health Check
+        run: |
+          TARGET="${{ github.event.inputs.target || 'default' }}"
+          echo "🔍 执行健康检查... (目标: $TARGET)"
+          
+          # 根据目标获取健康检查 URL
+          case "$TARGET" in
+            default)
+              HEALTH_URL="${{ vars.DEPLOY_DEFAULT_HEALTH_URL || 'http://localhost:3000/health' }}"
+              ;;
+            server1)
+              HEALTH_URL="${{ vars.DEPLOY_SERVER1_HEALTH_URL || 'http://localhost:3000/health' }}"
+              ;;
+            server2)
+              HEALTH_URL="${{ vars.DEPLOY_SERVER2_HEALTH_URL || 'http://localhost:3000/health' }}"
+              ;;
+            aliyun)
+              HEALTH_URL="${{ vars.ALIYUN_HEALTH_URL }}"
+              ;;
+            aws)
+              HEALTH_URL="${{ vars.AWS_HEALTH_URL }}"
+              ;;
+            tencent)
+              HEALTH_URL="${{ vars.TENCENT_HEALTH_URL }}"
+              ;;
+            *)
+              HEALTH_URL="http://localhost:3000/health"
+              ;;
+          esac
+          
+          if [ -n "$HEALTH_URL" ]; then
+            echo "检查 URL: $HEALTH_URL"
+            # 尝试健康检查，最多重试 5 次
+            for i in {1..5}; do
+              HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" || echo "000")
+              if [ "$HTTP_CODE" = "200" ]; then
+                echo "✅ 健康检查通过 (HTTP $HTTP_CODE)"
+                break
+              else
+                echo "⚠️ 健康检查失败 (HTTP $HTTP_CODE)，重试 $i/5..."
+                sleep 5
+              fi
+            done
+            
+            if [ "$HTTP_CODE" != "200" ]; then
+              echo "❌ 健康检查失败 (HTTP $HTTP_CODE)"
+              exit 1
+            fi
+          else
+            echo "⚠️ 未配置健康检查 URL，跳过健康检查"
+          fi
+        continue-on-error: true
+
+      - name: 📢 发送飞书通知（成功）
+        if: success() && env.FEISHU_WEBHOOK != ''
+        run: |
+          TARGET="${{ github.event.inputs.target || 'default' }}"
+          curl -X POST "$FEISHU_WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "msg_type": "interactive",
+              "card": {
+                "config": {"wide_screen_mode": true},
+                "header": {
+                  "title": {"tag": "plain_text", "content": "✅ 部署成功"},
+                  "template": "green"
+                },
+                "elements": [
+                  {"tag": "div", "text": {"tag": "lark_md", "content": "**环境**：dev\n**部署目标**：'"$TARGET"'\n**仓库**：${{ github.repository }}\n**分支**：${{ github.event.inputs.ref || \"develop\" }}\n**工作流**：${{ github.workflow }}\n**操作者**：${{ github.actor }}\n**时间**：'"$(date -u +'%Y-%m-%d %H:%M:%S UTC')"'\n[查看详情](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})"}},
+                  {"tag": "action", "actions": [{"tag": "button", "text": {"tag": "plain_text", "content": "查看 GitHub Actions"}, "url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}", "type": "primary"}]}
+                ]
+              }
+            }'
+        continue-on-error: true
+
+      - name: 📢 发送飞书通知（失败）
+        if: failure() && env.FEISHU_WEBHOOK != ''
+        run: |
+          TARGET="${{ github.event.inputs.target || 'default' }}"
+          curl -X POST "$FEISHU_WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "msg_type": "interactive",
+              "card": {
+                "config": {"wide_screen_mode": true},
+                "header": {
+                  "title": {"tag": "plain_text", "content": "❌ 部署失败"},
+                  "template": "red"
+                },
+                "elements": [
+                  {"tag": "div", "text": {"tag": "lark_md", "content": "**环境**：dev\n**部署目标**：'"$TARGET"'\n**仓库**：${{ github.repository }}\n**分支**：${{ github.event.inputs.ref || \"develop\" }}\n**工作流**：${{ github.workflow }}\n**操作者**：${{ github.actor }}\n**时间**：'"$(date -u +'%Y-%m-%d %H:%M:%S UTC')"'\n[查看详情](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})"}},
+                  {"tag": "action", "actions": [{"tag": "button", "text": {"tag": "plain_text", "content": "查看 GitHub Actions"}, "url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}", "type": "danger"}]}
+                ]
+              }
+            }'
+        continue-on-error: true

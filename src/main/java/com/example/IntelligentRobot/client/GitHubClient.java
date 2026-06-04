@@ -495,7 +495,41 @@ public String getBranchSha(String owner, String repo, String branch) {
     }
 
     /**
-     * 触发 GitHub Actions 工作流
+     * 触发 GitHub Actions 工作流（部署用）
+     * 部署完成后，工作流会直接调用飞书 Webhook 发送通知（方案1：无回调）
+     *
+     * @param owner      仓库所有者
+     * @param repo       仓库名称
+     * @param workflowId 工作流 ID 或文件名（如 deploy-dev.yml）
+     * @param ref        分支或 tag（如 main）
+     * @param inputs     工作流输入参数（可选，会合并 ref 作为 input）
+     * @return 触发结果
+     */
+    public Map<String, Object> triggerWorkflowWithCallback(
+            String owner, String repo, String workflowId, String ref,
+            Map<String, String> inputs, String deployId, String callbackUrl) {
+
+        // 方案1：直接触发工作流，不传 callbackUrl
+        // 工作流内部通过 secrets.FEISHU_DEPLOY_WEBHOOK 直接发送飞书通知
+        Map<String, String> finalInputs = new java.util.HashMap<>();
+        if (inputs != null && !inputs.isEmpty()) {
+            finalInputs.putAll(inputs);
+        }
+        // 只传 ref，不传 callbackUrl（工作流自行处理通知）
+        finalInputs.put("ref", ref);
+
+        String result = triggerWorkflow(owner, repo, workflowId, ref, finalInputs);
+
+        Map<String, Object> resultMap = new java.util.HashMap<>();
+        resultMap.put("code", 200);
+        resultMap.put("message", result);
+        resultMap.put("deploy_id", deployId);
+        resultMap.put("status", "triggered");
+        return resultMap;
+    }
+
+    /**
+     * 触发 GitHub Actions 工作流（兼容旧版本）
      * @param owner 仓库所有者
      * @param repo 仓库名称
      * @param workflowId 工作流 ID 或文件名（如 ci.yml）

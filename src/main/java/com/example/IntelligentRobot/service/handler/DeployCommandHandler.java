@@ -55,6 +55,12 @@ public class DeployCommandHandler {
      */
     private Map<String, String> deployConfig;
 
+    /**
+     * 支持的部署目标列表
+     */
+    private static final java.util.Set<String> SUPPORTED_TARGETS = 
+            java.util.Set.of("default", "server1", "server2", "aliyun", "aws", "tencent");
+
     @jakarta.annotation.PostConstruct
     public void init() {
         deployConfig = loadDeployConfig();
@@ -93,38 +99,79 @@ public class DeployCommandHandler {
         name = "deploy",
         description = "触发部署流程（需二次确认）",
         permissionLevel = "DEVELOPER",
-        usage = "/deploy <环境>"
+        usage = "/deploy <环境> [--target <目标>]"
     )
     public String handle(CommandContext context) {
-        String env = context.getArgs().trim();
         String operator = context.getSender() != null ? context.getSender().getOpenId() : "系统";
         String now = LocalDateTime.now(ZONE).format(FORMATTER);
+
+        // 如果已确认，直接执行部署（从 filledParams 中获取 target）
+        if (context.isConfirmed()) {
+            String target = (String) context.getFilledParam("deploy_target");
+            if (target == null) {
+                target = "default";
+            }
+            // 从 args 中获取环境（确认时 args 可能是 "dev|aliyun" 格式）
+            String args = context.getArgs() != null ? context.getArgs().trim() : "";
+            String normalizedEnv = args.split("\\|")[0].toLowerCase();
+            return executeDeploy(context, normalizedEnv, target, operator, now);
+        }
+
+        // 解析参数：支持 /deploy <环境> [--target <目标>]
+        String args = context.getArgs().trim();
         String chatId = context.getChatId();
         String openId = context.getSender() != null ? context.getSender().getOpenId() : null;
 
-        // 如果已确认，直接执行部署
-        if (context.isConfirmed()) {
-            return executeDeploy(context, env, operator, now);
-        }
+        // 解析环境和 target 参数
+        String env;
+        String target = "default";
+        
+        if (args.contains("--target")) {
+            String[] parts = args.split("--target");
+            env = parts[0].trim();
+            if (parts.length > 1) {
+                target = parts[1].trim().toLowerCase();
+                // 验证 target 是否合法
+                if (!SUPPORTED_TARGETS.contains(target)) {
+                    return String.format("""
+                            ❌ 部署目标无效：%s
 
-        // 更新任务状态：开始处理部署
+                            📡 支持的部署目标：
+                            %s
+
+                            💡 示例：
+                            `/deploy dev --target aliyun`
+                            """, target, String.join(", ", SUPPORTED_TARGETS));
+                }
+            }
+        } else {
+            env = args;
+        }
+        
+        String normalizedEnv = env.toLowerCase();
+
+        // 更新任务状态：开始处理部署请求
         TaskContext.updateProgress(10, "开始处理部署请求");
 
-        if (env.isEmpty()) {
+        if (normalizedEnv.isEmpty()) {
             return buildDeployHelp();
         }
 
-        String normalizedEnv = env.toLowerCase();
-
-        // 二次确认：存储待确认操作
+        // 二次确认：存储待确认操作（包含 target 信息）
         if (confirmService != null) {
-            String summary = String.format("部署环境：%s，操作者：%s", normalizedEnv, maskOpenId(openId));
-            String token = confirmService.storePendingAction(openId, chatId, "deploy", normalizedEnv, summary);
+            String targetInfo = "default".equals(target) ? "默认" : target;
+            String summary = String.format("部署环境：%s，部署目标：%s，操作者：%s", 
+                    normalizedEnv, targetInfo, maskOpenId(openId));
+            // 将 target 存入 filledParams，确认时传递
+            context.setFilledParam("deploy_target", target);
+            String token = confirmService.storePendingAction(openId, chatId, "deploy",
+                    normalizedEnv + "|" + target, summary);
             TaskContext.updateProgress(100, "等待用户确认");
             return String.format("""
                     ⚠️ 敏感操作确认
 
                     📦 操作：部署到 %s 环境
+                    📡 部署目标：%s
                     👤 操作者：%s
                     🕐 时间：%s
 
@@ -133,18 +180,18 @@ public class DeployCommandHandler {
 
                     ⏰ 确认令牌有效期：5 分钟
                     💡 如需取消，请忽略此消息
-                    """, normalizedEnv, operator, now, normalizedEnv, token);
+                    """, normalizedEnv, targetInfo, operator, now, normalizedEnv, token);
         }
 
         // Redis 不可用，直接执行（降级）
         log.warn("ConfirmService 不可用，跳过二次确认，直接执行部署");
-        return executeDeploy(context, env, operator, now);
+        return executeDeploy(context, normalizedEnv, target, operator, now);
     }
 
     /**
      * 实际执行部署（二次确认后调用）
      */
-    private String executeDeploy(CommandContext context, String env, String operator, String now) {
+    private String executeDeploy(CommandContext context, String env, String target, String operator, String now) {
         String normalizedEnv = env.toLowerCase();
 
         // 更新任务状态：验证环境配置
@@ -161,34 +208,48 @@ public class DeployCommandHandler {
                 // 更新任务状态：触发 GitHub Actions 工作流
                 TaskContext.updateProgress(70, "触发 GitHub Actions 工作流");
 
-                String result = gitHubClient.triggerWorkflow(
-                        config.owner(), 
-                        config.repo(), 
-                        config.workflowId(), 
-                        config.branch(), 
-                        null
+                // 生成唯一的部署 ID
+                String deployId = generateDeployId(normalizedEnv, operator);
+
+                // 构建 inputs，包含 target 参数
+                Map<String, String> inputs = new java.util.HashMap<>();
+                inputs.put("ref", config.branch());
+                inputs.put("target", target);
+
+                // 触发工作流（传入 target 参数）
+                Map<String, Object> resultMap = gitHubClient.triggerWorkflowWithCallback(
+                        config.owner(),
+                        config.repo(),
+                        config.workflowId(),
+                        config.branch(),
+                        inputs,  // 传入 inputs，包含 target
+                        deployId,
+                        null     // callbackUrl 不再需要
                 );
 
-                // 更新任务状态：部署已触发
-                TaskContext.updateProgress(90, "部署已触发，等待完成");
+                // 更新任务状态：部署已触发，飞书通知由工作流直接发送
+                TaskContext.updateProgress(80, "部署已触发，飞书通知将由 GitHub Actions 直接发送");
 
+                String targetInfo = "default".equals(target) ? "默认" : target;
                 String successMsg = String.format("""
                         🚀 部署已触发
 
                         📦 环境：%s
+                        📡 部署目标：%s
                         📂 仓库：%s/%s
                         🔧 工作流：%s
                         👤 操作者：%s
                         🕐 时间：%s
+                        🆔 部署 ID：%s
 
-                        %s
+                        📢 部署完成后将通过飞书通知您
 
                         🔗 GitHub Actions: %s/%s/actions
-                        """, normalizedEnv, config.owner(), config.repo(), 
-                           config.workflowId(), operator, now, result,
+                        """, normalizedEnv, targetInfo, config.owner(), config.repo(),
+                           config.workflowId(), operator, now, deployId,
                            config.owner(), config.repo());
                 
-                // 发送降噪通知
+                // 发送降噪通知（触发成功通知）
                 sendDeployNotification(context, successMsg, normalizedEnv);
                 
                 return successMsg;
@@ -200,12 +261,13 @@ public class DeployCommandHandler {
                         ❌ 部署失败
 
                         📦 环境：%s
+                        📡 部署目标：%s
                         👤 操作者：%s
 
                         错误：%s
 
                         💡 请检查 GitHub 配置
-                        """, normalizedEnv, operator, e.getMessage());
+                        """, normalizedEnv, target, operator, e.getMessage());
                 
                 // 发送降噪通知
                 sendDeployNotification(context, errorMsg, normalizedEnv);
@@ -225,6 +287,7 @@ public class DeployCommandHandler {
                     ⚠️ 生产环境部署确认
 
                     📦 环境：production
+                    📡 部署目标：%s
                     👤 操作者：%s
                     🕐 时间：%s
 
@@ -232,7 +295,7 @@ public class DeployCommandHandler {
                     当前为模拟模式，未执行实际部署操作。
 
                     如需接入真实部署，请配置 github.token 并启用 GitHub 集成
-                    """, operator, now);
+                    """, target, operator, now);
         }
 
         String envLabel = switch (normalizedEnv) {
@@ -242,10 +305,12 @@ public class DeployCommandHandler {
             default -> normalizedEnv;
         };
 
+        String targetInfo = "default".equals(target) ? "默认" : target;
         return String.format("""
                 🚀 模拟部署流程
 
                 📦 环境：%s（%s）
+                📡 部署目标：%s
                 👤 操作者：%s
                 🕐 时间：%s
 
@@ -259,7 +324,7 @@ public class DeployCommandHandler {
 
                 💡 当前为模拟模式。
                 如需接入真实部署，请配置 GitHub Actions 集成。
-                """, normalizedEnv, envLabel, operator, now);
+                """, normalizedEnv, envLabel, targetInfo, operator, now);
     }
 
     /**
@@ -306,9 +371,18 @@ public class DeployCommandHandler {
                 • staging - 预发布环境
                 • prod / production - 生产环境
 
+                📡 可用部署目标（--target）：
+                • default - 默认服务器
+                • server1 - 服务器1
+                • server2 - 服务器2
+                • aliyun - 阿里云
+                • aws - AWS
+                • tencent - 腾讯云
+
                 💡 示例：
-                /deploy test
-                /deploy prod
+                /deploy dev
+                /deploy dev --target aliyun
+                /deploy prod --target tencent
 
                 🔧 高级用法（直接触发 GitHub Actions）：
                 /github workflow <仓库> <工作流文件> <分支>
@@ -322,6 +396,15 @@ public class DeployCommandHandler {
     private String maskOpenId(String openId) {
         if (openId == null || openId.length() < 8) return "***";
         return openId.substring(0, 4) + "***" + openId.substring(openId.length() - 4);
+    }
+
+    /**
+     * 生成唯一的部署 ID
+     */
+    private String generateDeployId(String env, String operator) {
+        String timestamp = LocalDateTime.now(ZONE).format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        String random = java.util.UUID.randomUUID().toString().substring(0, 8);
+        return String.format("deploy-%s-%s-%s", env, timestamp, random);
     }
 
     /**
