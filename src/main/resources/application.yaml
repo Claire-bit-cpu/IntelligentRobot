@@ -82,7 +82,15 @@ github:
   # GitHub Actions 部署配置
   # 用于 /deploy 指令触发 GitHub Actions 工作流
   # 格式：环境名:owner/repo:工作流文件名:分支名（多个环境用逗号分隔）
-  deploy: "dev:Claire-bit-cpu/Test:deploy-dev.yml:develop,test:Claire-bit-cpu/Test:deploy-test.yml:test,staging:Claire-bit-cpu/Test:deploy-staging.yml:staging,prod:Claire-bit-cpu/Test:deploy-prod.yml:main"
+  deploy: "dev:Claire-bit-cpu/Test:deploy-dev-java.yml:master,test:Claire-bit-cpu/Test:deploy-test-java.yml:master,staging:Claire-bit-cpu/Test:deploy-staging-java.yml:master,prod:Claire-bit-cpu/Test:deploy-prod-java.yml:master"
+
+  # GitHub Actions 回调配置
+  # 用于接收 GitHub Actions 工作流完成事件
+  callback:
+    # 回调 URL（GitHub Actions 工作流完成后调用的 URL）
+    url: ${GITHUB_CALLBACK_URL:}
+    # 回调密钥（用于验证回调请求）
+    secret: ${GITHUB_CALLBACK_SECRET:}
 
 # GitLab 配置
 gitlab:

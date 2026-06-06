@@ -1,0 +1,236 @@
+name: Deploy Java to Test Environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: '分支/Tag/SHA（默认 master）'
+        required: false
+        default: 'master'
+      target:
+        description: '部署目标（default/server1/server2/aliyun/aws/tencent）'
+        required: false
+        default: 'default'
+        type: choice
+        options:
+          - default
+          - server1
+          - server2
+          - aliyun
+          - aws
+          - tencent
+      callback_url:
+        description: '回调 URL（部署完成后调用，用于发送飞书通知）'
+        required: false
+        default: ''
+
+env:
+  DEPLOY_ENV: test
+  JAR_NAME: IntelligentRobot-0.0.1-SNAPSHOT.jar
+  JAVA_VERSION: '17'
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy Java to Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || 'master' }}
+
+      - name: ☕ Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: 📦 Build with Maven
+        run: |
+          echo "🏗️ 开始 Maven 构建..."
+          mvn clean package -DskipTests -B
+          echo "✅ 构建完成"
+          ls -lh target/*.jar
+
+      - name: 🔍 Validate Configuration
+        run: |
+          TARGET="${{ github.event.inputs.target || 'default' }}"
+          echo "🔍 验证部署配置... (目标: $TARGET)"
+          
+          case "$TARGET" in
+            default)
+              [ -z "${{ vars.DEPLOY_DEFAULT_HOST }}" ] && echo "❌ 缺少配置: DEPLOY_DEFAULT_HOST" && exit 1
+              [ -z "${{ secrets.DEPLOY_DEFAULT_SSH_KEY }}" ] && echo "❌ 缺少配置: DEPLOY_DEFAULT_SSH_KEY" && exit 1
+              echo "✅ 默认服务器配置验证通过"
+              ;;
+            server1)
+              [ -z "${{ vars.DEPLOY_SERVER1_HOST }}" ] && echo "❌ 缺少配置: DEPLOY_SERVER1_HOST" && exit 1
+              [ -z "${{ secrets.DEPLOY_SERVER1_SSH_KEY }}" ] && echo "❌ 缺少配置: DEPLOY_SERVER1_SSH_KEY" && exit 1
+              echo "✅ Server1 配置验证通过"
+              ;;
+            server2)
+              [ -z "${{ vars.DEPLOY_SERVER2_HOST }}" ] && echo "❌ 缺少配置: DEPLOY_SERVER2_HOST" && exit 1
+              [ -z "${{ secrets.DEPLOY_SERVER2_SSH_KEY }}" ] && echo "❌ 缺少配置: DEPLOY_SERVER2_SSH_KEY" && exit 1
+              echo "✅ Server2 配置验证通过"
+              ;;
+            aliyun)
+              [ -z "${{ secrets.ALIYUN_ACCESS_KEY_ID }}" ] && echo "❌ 缺少配置: ALIYUN_ACCESS_KEY_ID" && exit 1
+              [ -z "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}" ] && echo "❌ 缺少配置: ALIYUN_ACCESS_KEY_SECRET" && exit 1
+              echo "✅ 阿里云配置验证通过"
+              ;;
+            aws)
+              [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ] && echo "❌ 缺少配置: AWS_ACCESS_KEY_ID" && exit 1
+              [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ] && echo "❌ 缺少配置: AWS_SECRET_ACCESS_KEY" && exit 1
+              echo "✅ AWS 配置验证通过"
+              ;;
+            tencent)
+              [ -z "${{ secrets.TENCENT_SECRET_ID }}" ] && echo "❌ 缺少配置: TENCENT_SECRET_ID" && exit 1
+              [ -z "${{ secrets.TENCENT_SECRET_KEY }}" ] && echo "❌ 缺少配置: TENCENT_SECRET_KEY" && exit 1
+              echo "✅ 腾讯云配置验证通过"
+              ;;
+          esac
+
+      - name: 🚀 Deploy to Target
+        run: |
+          TARGET="${{ github.event.inputs.target || 'default' }}"
+          echo "🚀 开始部署 Java 应用到: $TARGET"
+          
+          setup_ssh_key() {
+            local key_content=$1
+            if [ -n "$key_content" ]; then
+              echo "$key_content" > /tmp/deploy_key
+              chmod 600 /tmp/deploy_key
+              echo "/tmp/deploy_key"
+            fi
+          }
+          
+          case "$TARGET" in
+            default)
+              SSH_HOST="${{ vars.DEPLOY_DEFAULT_HOST }}"
+              SSH_USER="${{ vars.DEPLOY_DEFAULT_USER || 'root' }}"
+              REMOTE_PATH="${{ vars.DEPLOY_DEFAULT_PATH || '/app' }}"
+              SSH_KEY=$(setup_ssh_key "${{ secrets.DEPLOY_DEFAULT_SSH_KEY }}")
+              ;;
+            server1)
+              SSH_HOST="${{ vars.DEPLOY_SERVER1_HOST }}"
+              SSH_USER="${{ vars.DEPLOY_SERVER1_USER || 'root' }}"
+              REMOTE_PATH="${{ vars.DEPLOY_SERVER1_PATH || '/app' }}"
+              SSH_KEY=$(setup_ssh_key "${{ secrets.DEPLOY_SERVER1_SSH_KEY }}")
+              ;;
+            server2)
+              SSH_HOST="${{ vars.DEPLOY_SERVER2_HOST }}"
+              SSH_USER="${{ vars.DEPLOY_SERVER2_USER || 'root' }}"
+              REMOTE_PATH="${{ vars.DEPLOY_SERVER2_PATH || '/app' }}"
+              SSH_KEY=$(setup_ssh_key "${{ secrets.DEPLOY_SERVER2_SSH_KEY }}")
+              ;;
+            aliyun)
+              SSH_HOST="${{ vars.ALIYUN_ECS_HOST }}"
+              SSH_USER="${{ vars.ALIYUN_ECS_USER || 'root' }}"
+              REMOTE_PATH="${{ vars.ALIYUN_ECS_PATH || '/app' }}"
+              SSH_KEY=$(setup_ssh_key "${{ secrets.ALIYUN_ECS_SSH_KEY }}")
+              ;;
+            aws)
+              SSH_HOST="${{ vars.AWS_EC2_HOST }}"
+              SSH_USER="${{ vars.AWS_EC2_USER || 'ubuntu' }}"
+              REMOTE_PATH="${{ vars.AWS_EC2_PATH || '/app' }}"
+              SSH_KEY=$(setup_ssh_key "${{ secrets.AWS_EC2_SSH_KEY }}")
+              ;;
+            tencent)
+              SSH_HOST="${{ vars.TENCENT_CVM_HOST }}"
+              SSH_USER="${{ vars.TENCENT_CVM_USER || 'root' }}"
+              REMOTE_PATH="${{ vars.TENCENT_CVM_PATH || '/app' }}"
+              SSH_KEY=$(setup_ssh_key "${{ secrets.TENCENT_CVM_SSH_KEY }}")
+              ;;
+          esac
+          
+          echo "📤 上传 JAR 文件到 $SSH_USER@$SSH_HOST:$REMOTE_PATH"
+          scp -i "$SSH_KEY" -o StrictHostKeyChecking=no target/${{ env.JAR_NAME }} "$SSH_USER@$SSH_HOST:$REMOTE_PATH/app.jar"
+          
+          echo "🔄 重启 Java 服务..."
+          ssh -i "$SSH_KEY" -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" \
+            "cd $REMOTE_PATH && \
+            (if [ -f app.pid ]; then OLD_PID=\$(cat app.pid); if kill -0 \$OLD_PID 2>/dev/null; then kill \$OLD_PID || true; sleep 5; fi; fi) && \
+            nohup java -jar app.jar > app.log 2>&1 & \
+            echo \$! > app.pid && \
+            echo '✅ 服务启动完成 (PID: '\$(cat app.pid)')'"
+          
+          echo "✅ 部署完成"
+
+      - name: 🔍 Health Check
+        run: |
+          TARGET="${{ github.event.inputs.target || 'default' }}"
+          echo "🔍 执行健康检查... (目标: $TARGET)"
+          
+          case "$TARGET" in
+            default)   HEALTH_URL="${{ vars.DEPLOY_DEFAULT_HEALTH_URL || 'http://localhost:8080/actuator/health' }}" ;;
+            server1)   HEALTH_URL="${{ vars.DEPLOY_SERVER1_HEALTH_URL || 'http://localhost:8080/actuator/health' }}" ;;
+            server2)   HEALTH_URL="${{ vars.DEPLOY_SERVER2_HEALTH_URL || 'http://localhost:8080/actuator/health' }}" ;;
+            aliyun)    HEALTH_URL="${{ vars.ALIYUN_HEALTH_URL }}" ;;
+            aws)       HEALTH_URL="${{ vars.AWS_HEALTH_URL }}" ;;
+            tencent)   HEALTH_URL="${{ vars.TENCENT_HEALTH_URL }}" ;;
+            *)         HEALTH_URL="http://localhost:8080/actuator/health" ;;
+          esac
+          
+          if [ -n "$HEALTH_URL" ]; then
+            echo "检查 URL: $HEALTH_URL"
+            sleep 10
+            for i in {1..10}; do
+              HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" || echo "000")
+              if [ "$HTTP_CODE" = "200" ]; then
+                echo "✅ 健康检查通过 (HTTP $HTTP_CODE)"
+                break
+              else
+                echo "⚠️ 健康检查失败 (HTTP $HTTP_CODE)，重试 $i/10..."
+                sleep 10
+              fi
+            done
+            if [ "$HTTP_CODE" != "200" ]; then
+              echo "❌ 健康检查失败 (HTTP $HTTP_CODE)"
+              exit 1
+            fi
+          else
+            echo "⚠️ 未配置健康检查 URL，跳过健康检查"
+          fi
+        continue-on-error: true
+
+      - name: 📢 回调通知（成功）
+        if: success() && github.event.inputs.callback_url != ''
+        run: |
+          TARGET="${{ github.event.inputs.target || 'default' }}"
+          STATUS="success"
+          ENVIRONMENT="test"
+          REPOSITORY="${{ github.repository }}"
+          REF="${{ github.event.inputs.ref || 'master' }}"
+          ACTOR="${{ github.actor }}"
+          RUN_ID="${{ github.run_id }}"
+          TIMESTAMP="$(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          CALLBACK_URL="${{ github.event.inputs.callback_url }}"
+          
+          echo "📢 发送成功回调到: $CALLBACK_URL"
+          
+          curl -X POST "$CALLBACK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\":\"$STATUS\",\"environment\":\"$ENVIRONMENT\",\"target\":\"$TARGET\",\"repository\":\"$REPOSITORY\",\"ref\":\"$REF\",\"actor\":\"$ACTOR\",\"run_id\":\"$RUN_ID\",\"timestamp\":\"$TIMESTAMP\"}"
+        continue-on-error: true
+
+      - name: 📢 回调通知（失败）
+        if: failure() && github.event.inputs.callback_url != ''
+        run: |
+          TARGET="${{ github.event.inputs.target || 'default' }}"
+          STATUS="failure"
+          ENVIRONMENT="test"
+          REPOSITORY="${{ github.repository }}"
+          REF="${{ github.event.inputs.ref || 'master' }}"
+          ACTOR="${{ github.actor }}"
+          RUN_ID="${{ github.run_id }}"
+          TIMESTAMP="$(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          CALLBACK_URL="${{ github.event.inputs.callback_url }}"
+          
+          echo "📢 发送失败回调到: $CALLBACK_URL"
+          
+          curl -X POST "$CALLBACK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\":\"$STATUS\",\"environment\":\"$ENVIRONMENT\",\"target\":\"$TARGET\",\"repository\":\"$REPOSITORY\",\"ref\":\"$REF\",\"actor\":\"$ACTOR\",\"run_id\":\"$RUN_ID\",\"timestamp\":\"$TIMESTAMP\"}"
+        continue-on-error: true

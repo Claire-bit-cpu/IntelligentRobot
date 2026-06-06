@@ -95,4 +95,38 @@ public class GitHubConfig {
     public void setDeveloperOpenIds(String developerOpenIds) {
         this.developerOpenIds = developerOpenIds;
     }
+
+    /**
+     * GitHub Actions 回调配置
+     */
+    private Callback callback = new Callback();
+
+    public static class Callback {
+        private String url;
+        private String secret;
+
+        public String getUrl() {
+            return url;
+        }
+
+        public void setUrl(String url) {
+            this.url = url;
+        }
+
+        public String getSecret() {
+            return secret;
+        }
+
+        public void setSecret(String secret) {
+            this.secret = secret;
+        }
+    }
+
+    public Callback getCallback() {
+        return callback;
+    }
+
+    public void setCallback(Callback callback) {
+        this.callback = callback;
+    }
 }

@@ -10,12 +10,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 部署指令处理器（新框架版本）
@@ -48,6 +50,12 @@ public class DeployCommandHandler {
      */
     @Autowired
     private Environment environment;
+
+    /**
+     * Redis 模板，用于存储回调 token
+     */
+    @Autowired(required = false)
+    private StringRedisTemplate stringRedisTemplate;
 
     /**
      * 部署环境映射配置
@@ -216,7 +224,32 @@ public class DeployCommandHandler {
                 inputs.put("ref", config.branch());
                 inputs.put("target", target);
 
-                // 触发工作流（传入 target 参数）
+                // 构建回调地址
+                String callbackBaseUrl = environment.getProperty("github.callback.url");
+                String callbackSecret = environment.getProperty("github.callback.secret");
+                String callbackToken = java.util.UUID.randomUUID().toString().substring(0, 16);
+                
+                // 存储 callbackToken 到 Redis（用于验证回调请求）
+                // Key 格式：deploy:callback:token:{deployId}
+                // Value: callbackToken
+                // 过期时间：24 小时
+                if (stringRedisTemplate != null) {
+                    String redisKey = "deploy:callback:token:" + deployId;
+                    stringRedisTemplate.opsForValue().set(redisKey, callbackToken, 24, TimeUnit.HOURS);
+                    log.info("回调 token 已存储到 Redis: deployId={}", deployId);
+                } else {
+                    log.warn("StringRedisTemplate 不可用，无法存储回调 token");
+                }
+                
+                String callbackUrl = null;
+                if (callbackBaseUrl != null && !callbackBaseUrl.isEmpty()) {
+                    callbackUrl = callbackBaseUrl + "?deployId=" + deployId + "&token=" + callbackToken;
+                    log.info("部署回调地址: {}", callbackUrl);
+                } else {
+                    log.warn("未配置 github.callback.url，GitHub Actions 将无法回调通知部署结果");
+                }
+                
+                // 触发工作流（传入 target 和 callbackUrl）
                 Map<String, Object> resultMap = gitHubClient.triggerWorkflowWithCallback(
                         config.owner(),
                         config.repo(),
@@ -224,7 +257,7 @@ public class DeployCommandHandler {
                         config.branch(),
                         inputs,  // 传入 inputs，包含 target
                         deployId,
-                        null     // callbackUrl 不再需要
+                        callbackUrl  // 传入回调地址
                 );
 
                 // 更新任务状态：部署已触发，飞书通知由工作流直接发送

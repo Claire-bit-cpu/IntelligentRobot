@@ -496,27 +496,33 @@ public String getBranchSha(String owner, String repo, String branch) {
 
     /**
      * 触发 GitHub Actions 工作流（部署用）
-     * 部署完成后，工作流会直接调用飞书 Webhook 发送通知（方案1：无回调）
+     * 部署完成后，工作流会调用回调地址发送通知（方案2：回调）
      *
-     * @param owner      仓库所有者
-     * @param repo       仓库名称
-     * @param workflowId 工作流 ID 或文件名（如 deploy-dev.yml）
-     * @param ref        分支或 tag（如 main）
-     * @param inputs     工作流输入参数（可选，会合并 ref 作为 input）
+     * @param owner       仓库所有者
+     * @param repo        仓库名称
+     * @param workflowId  工作流 ID 或文件名（如 deploy-dev.yml）
+     * @param ref         分支或 tag（如 main）
+     * @param inputs      工作流输入参数（可选，会合并 ref 作为 input）
+     * @param deployId    部署 ID
+     * @param callbackUrl 回调地址（部署完成后 GitHub Actions 调用此地址通知结果）
      * @return 触发结果
      */
     public Map<String, Object> triggerWorkflowWithCallback(
             String owner, String repo, String workflowId, String ref,
             Map<String, String> inputs, String deployId, String callbackUrl) {
 
-        // 方案1：直接触发工作流，不传 callbackUrl
-        // 工作流内部通过 secrets.FEISHU_DEPLOY_WEBHOOK 直接发送飞书通知
+        // 方案2：将 callbackUrl 传递到工作流 inputs 中
+        // 工作流完成后调用 callbackUrl 通知部署结果
         Map<String, String> finalInputs = new java.util.HashMap<>();
         if (inputs != null && !inputs.isEmpty()) {
             finalInputs.putAll(inputs);
         }
-        // 只传 ref，不传 callbackUrl（工作流自行处理通知）
+        // 传入 ref 和 callbackUrl
         finalInputs.put("ref", ref);
+        if (callbackUrl != null && !callbackUrl.isEmpty()) {
+            finalInputs.put("callback_url", callbackUrl);
+            logger.info("传入回调地址到工作流: {}", callbackUrl);
+        }
 
         String result = triggerWorkflow(owner, repo, workflowId, ref, finalInputs);
 
