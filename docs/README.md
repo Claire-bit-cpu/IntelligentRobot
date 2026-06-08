@@ -12,7 +12,7 @@
 
 ---
 
-## 📋 目录 (Table of Contents)
+##  目录 (Table of Contents)
 
 1. [项目简介](#项目简介)
 2. [核心功能模块](#核心功能模块)
@@ -26,23 +26,22 @@
 7. [Webhook 配置教程](#webhook-配置教程)
 8. [开发指南 (Developer Guide)](#开发指南-developer-guide)
 9. [交付产物说明](#交付产物说明)
-10. [许可证](#许可证)
 
 ---
 
-## 项目简介
+## 1.项目简介
 
-**IntelligentRobot** 是一个基于 [飞书开放平台](https://open.feishu.cn/) 开发的企业级智能助手机器人，旨在通过自然语言指令深度集成企业内部 DevOps 工具链与 AI 能力，全面提升研发团队协作效率与办公自动化水平。
+**IntelligentRobot** 是一个基于 [飞书开放平台](https://open.feishu.cn/) 开发的智能助手机器人，旨在通过自然语言指令深度集成企业内部 DevOps 工具链与 AI 能力，全面提升研发团队协作效率与办公自动化水平。
 
 ### 核心特性
 
-- 🤖 **AI 赋能**：集成通义千问，支持智能代码审查、自然语言理解、智能翻译
-- 🔧 **DevOps 全链路**：GitHub/GitLab + Jenkins + JIRA + Prometheus/Grafana 一站式集成
-- 🔍 **智能降噪**：消息去重 + 消息合并，有效减少通知疲劳
-- 🧠 **上下文感知**：支持多轮对话，自动记忆用户偏好和输入历史
-- 🔐 **权限控制**：RBAC 模型，支持动态配置热更新
-- ⚡ **高并发架构**：Webhook 快速响应（10ms 内），业务逻辑全异步执行
-- 📦 **可扩展框架**：基于注解的指令注册，支持动态加载和热插拔
+-  **AI 赋能**：集成通义千问，支持智能代码审查、自然语言理解、智能翻译
+-  **DevOps 全链路**：GitHub+JIRA  集成
+-  **智能降噪**：消息去重 + 消息合并，有效减少通知疲劳
+-  **上下文感知**：支持多轮对话，自动记忆用户偏好和输入历史
+-  **权限控制**：RBAC 模型，支持动态配置热更新
+-  **高并发架构**：Webhook 快速响应（10ms 内），业务逻辑全异步执行
+-  **可扩展框架**：基于注解的指令注册，支持动态加载和热插拔
 
 ###  
 
@@ -53,7 +52,7 @@
 | **缓存** | Redis（Lettuce 客户端，连接池） |
 | **搜索引擎** | SQLite FTS5（trigram 分词，毫秒级响应） |
 | **AI 能力** | 通义千问 DashScope SDK |
-| **监控** | Spring Boot Actuator + Prometheus + Grafana |
+| **监控** | Spring Boot Actuator |
 | **构建工具** | Maven |
 | **JSON 处理** | Jackson |
 | **简化代码** | Lombok |
@@ -61,9 +60,9 @@
 
 ---
 
-## 核心功能模块
+## 2.核心功能模块
 
-### 1. 基础指令集
+### 2.1 基础指令集
 
 基础指令集提供日常办公所需的常用功能，所有成员均可使用。
 
@@ -73,7 +72,7 @@
 | `/ping` | `/ping` | 检测服务器连通性 |
 | `/uptime` | `/uptime` | 查看系统运行时间和健康状态 |
 | `/weather` | `/weather 北京` | 查询城市天气（支持上下文记忆） |
-| `/translate` | `/translate Hello` | 中英互译 |
+| `/translate` | `/translate Hello` | 多语言翻译（中文、英语、日语、韩语互译） |
 | `/schedule` | `/schedule 1400 开会` | 创建飞书日程（支持上下文记忆） |
 | `/updateschedule` | `/updateschedule` | 修改已创建的飞书日程 |
 | `/group` | `/group 新群` | 创建飞书群组并添加成员（**需二次确认**） |
@@ -81,11 +80,11 @@
 | `/myid` | `/myid` | 获取你的飞书用户 Open ID |
 | `/clear` | `/clear` | 清空对话历史和上下文 |
 
-### 2. 企业效率集成
+### 2.2 企业效率集成
 
-深度集成企业常用 DevOps 工具，赋能研发团队。
+集成企业常用 DevOps 工具，赋能研发团队。
 
-#### 2.1 JIRA 任务管理
+#### 2.2.1 JIRA 任务管理
 
 | 指令 | 语法示例 | 功能描述 |
 |------|---------|---------|
@@ -95,17 +94,9 @@
 
 > **特性**：支持本地降级模式（无需 JIRA 服务器即可测试），配置 `jira.local-fallback-file=./local_tasks.md` 即可启用。
 
-#### 2.2 监控与告警
+### 2.3. 高级功能扩展
 
-| 指令 | 语法示例 | 功能描述 |
-|------|---------|---------|
-| `/monitor` | `/monitor api-service` | 查询服务健康状态和监控指标 |
-
-> 集成 Prometheus + Grafana，支持自定义告警规则。
-
-### 3. 高级功能扩展
-
-#### 3.0 智能降噪功能 ⭐
+#### 2.3.1 智能降噪功能 ⭐
 
 **功能概述**：通过消息去重和消息合并技术，有效减少通知疲劳，提升团队协作效率。
 
@@ -129,7 +120,7 @@ notification:
   
   batch:
     enabled: true  # 启用消息合并（默认 true）
-    window-seconds: 300  # 合并窗口：5分钟
+    window-seconds: 43200  # 合并窗口：12小时
     threshold: 5  # 合并阈值：达到5条立即推送合并摘要
 ```
 
@@ -407,7 +398,7 @@ redis-cli KEYS "notify:*"
 
 ---
 
-#### 3.1 Git 集成与代码操作
+#### 2.4.1 Git 集成与代码操作
 
 支持 GitHub 和 GitLab 两大平台，通过**仓库别名映射**简化操作。
 
@@ -423,7 +414,7 @@ redis-cli KEYS "notify:*"
 
 > **仓库别名配置**：通过环境变量 `GITHUB_REPO_ALIASES=frontend=owner/repo,backend=owner/repo` 设置，之后即可用别名代替 `owner/repo`。
 
-#### 3.2 自动代码审查 (Code Review)
+#### 2.4.2 自动代码审查 (Code Review)
 
 利用 AI（通义千问）自动分析代码质量，支持手动触发和 Webhook 自动触发。
 
@@ -461,7 +452,7 @@ redis-cli KEYS "notify:*"
 
 **自动触发**：配置 `github.webhook.auto-review=true` 后，Push/PR 事件将自动触发 AI 审查并推送结果到飞书群。
 
-#### 3.3 开发效率工具
+#### 2.4.3 开发效率工具
 
 | 工具 | 描述 |
 |------|------|
@@ -469,10 +460,8 @@ redis-cli KEYS "notify:*"
 | **消息去重** | 5 分钟窗口内相同内容的推送只通知一次 |
 | **消息合并** | 5 分钟内的同类通知合并为一条摘要 |
 | **新成员欢迎** | 自动发送欢迎消息并引导使用 `/help` |
-| **审批流程** | 集成飞书审批，支持自定义审批模板 |
 
-#### 3.4 可扩展指令框架
-
+#### 2.4.4 可扩展指令框架
 基于自定义 `@Command` 注解的指令注册框架，支持：
 
 - **自动扫描**：启动时自动扫描并注册所有标注 `@Command` 的 Bean
@@ -502,7 +491,7 @@ public class MyCommandHandler implements CommandHandler {
 
 ---
 
-## 技术架构
+## 3.技术架构
 
 ### 系统架构图
 
@@ -579,9 +568,9 @@ FeishuClient (发送回复)
 
 ---
 
-## 技术挑战与实现要点
+## 4.技术挑战与实现要点
 
-### 1. Webhook 签名验证与高并发事件处理
+### 4.1 Webhook 签名验证与高并发事件处理
 
 **挑战**：飞书 Webhook 要求在 10 秒内响应，且会进行超时重试（指数退避），高并发下容易产生重复处理。
 
@@ -602,7 +591,7 @@ if (redisTemplate.hasKey(idempotentKey)) {
 redisTemplate.opsForValue().set(idempotentKey, "1", Duration.ofHours(24));
 ```
 
-### 2. 异步任务状态跟踪
+### 4.2 异步任务状态跟踪
 
 **挑战**：部署任务可能需要数分钟，用户需要查询进度或接收完成通知。
 
@@ -621,7 +610,7 @@ public AsyncTaskStatus getTaskStatus(@PathVariable String taskId) {
 }
 ```
 
-### 3. 安全性：敏感操作二次确认
+### 4.3 安全性：敏感操作二次确认
 
 **挑战**：部署、创建分支等敏感操作必须有额外确认机制，防止误操作。
 
@@ -651,7 +640,7 @@ POST /api/auth/users
 
 ---
 
-## 快速开始 (Quick Start)
+## 5.快速开始 (Quick Start)
 
 ### 前置要求
 
@@ -660,14 +649,14 @@ POST /api/auth/users
 - **Maven** 3.6 或更高版本
 - **飞书开放平台** 应用（需要 App ID 和 App Secret）
 
-### 1. 克隆项目
+### 5.1 克隆项目
 
 ```bash
 git clone https://github.com/your-username/IntelligentRobot.git
 cd IntelligentRobot
 ```
 
-### 2. 配置环境变量
+### 5.2 配置环境变量
 
 创建 `.env` 文件或直接设置环境变量：
 
@@ -726,7 +715,7 @@ export TASK_STATUS_MAX_LOGS_LENGTH=10000
 export TASK_MONITOR_CHAT_ID=oc_xxx
 ```
 
-### 3. 构建项目
+### 5.3 构建项目
 
 ```bash
 # Linux/Mac
@@ -736,7 +725,7 @@ export TASK_MONITOR_CHAT_ID=oc_xxx
 mvnw.cmd clean package -DskipTests
 ```
 
-### 4. 启动服务
+### 5.4 启动服务
 
 ```bash
 java -jar target/IntelligentRobot-0.0.1-SNAPSHOT.jar
@@ -744,7 +733,7 @@ java -jar target/IntelligentRobot-0.0.1-SNAPSHOT.jar
 
 服务默认运行在 `http://localhost:8082`。
 
-### 5. 验证部署
+### 5.5 验证部署
 
 ```bash
 # 健康检查
@@ -756,34 +745,11 @@ curl -X POST http://localhost:8082/feishu/webhook \
   -d '{"header":{"event_id":"test-001"},"event":{"type":"im.message.receive_v1"}}'
 ```
 
-### Docker 部署（可选）
-
-```dockerfile
-# Dockerfile 示例
-FROM openjdk:17-jdk-slim
-COPY ../target/IntelligentRobot-0.0.1-SNAPSHOT.jar app.jar
-ENTRYPOINT ["java","-jar","/app.jar"]
-```
-
-```bash
-# 构建镜像
-docker build -t intelligent-robot:latest .
-
-# 运行容器
-docker run -d \
-  -p 8082:8082 \
-  -e FEISHU_APP_ID=your_app_id \
-  -e FEISHU_APP_SECRET=your_app_secret \
-  -e REDIS_HOST=redis \
-  --name intelligent-robot \
-  intelligent-robot:latest
-```
-
 ---
 
-## 指令大全 (Command List)
+## 6.指令大全 (Command List)
 
-### 权限说明
+### 6.1权限说明
 
 | 权限级别 | 说明 | 标识 |
 |---------|------|------|
@@ -791,7 +757,7 @@ docker run -d \
 | **DEVELOPER** | 需要开发者权限（读写操作） | 🟡 |
 | **ADMIN** | 需要管理员权限（敏感操作） | 🔴 |
 
-### 完整指令表
+### 6.2完整指令表
 
 | 指令 | 权限 | 上下文感知 | 二次确认 | 描述 |
 |------|------|-----------|---------|------|
@@ -817,11 +783,11 @@ docker run -d \
 | `/mergestatus` | 🟡 | ✅ | ❌ | 查看 PR 状态 |
 | `/pr` | 🟡 | ✅ | ❌ | 查看 PR 信息 |
 | `/repo` | 🟡 | ✅ | ❌ | 查看仓库信息 |
-| `/deploy` | 🔴 | ❌ | ✅ | 触发部署 |
+| `/deploy` | 🔴 | ❌ | ✅ | 触发部署（支持 --target 指定部署目标） |
 | `/monitor` | 🟡 | ❌ | ❌ | 服务监控 |
 | `/confirm` | 🟢 | ❌ | ❌ | 确认敏感操作 |
 
-### 上下文感知说明
+### 6.3上下文感知说明
 
 支持上下文感知的指令会**记住用户上次输入的参数**，下次执行时如未提供参数，自动使用历史值。
 
@@ -844,9 +810,215 @@ docker run -d \
 
 ---
 
-## Webhook 配置教程
+## 6.4功能详细说明
 
-### 1. 飞书 Webhook 配置
+### 6.4.1 翻译功能 (`/translate`)
+
+#### 支持的翻译语言
+
+- **中文** (中文)
+- **英语** (English)
+- **日语** (日本語)
+- **韩语** (한국어)
+
+#### 指令格式
+
+1. **自动检测语言**：`/translate <文本>`
+   - 系统自动检测源语言，并翻译为合适的目标语言
+   - 规则：非中文 → 中文，中文 → 英语
+   - 示例：`/translate Hello World` → `你好世界`
+   - 示例：`/translate 你好` → `Hello`
+
+2. **指定目标语言**：`/translate <目标语言> <文本>`
+   - 自动检测源语言，翻译为指定语言
+   - 支持语言：中文、英语、日语、韩语
+   - 示例：`/translate 日语 Hello` → `こんにちは`
+   - 示例：`/translate 中文 こんにちは` → `你好`
+
+3. **指定源语言和目标语言**：`/translate <源语言> <目标语言> <文本>`
+   - 精确控制翻译方向
+   - 示例：`/translate 英语 日语 Hello` → `こんにちは`
+   - 示例：`/translate 中文 韩语 你好` → `안녕하세요`
+
+#### 使用示例
+
+```
+用户: /translate Hello World
+机器人: 🌐 翻译结果（英语 → 中文）：
+你好世界
+
+用户: /translate 日语 你好
+机器人: 🌐 翻译结果（中文 → 日语）：
+こんにちは
+
+用户: /translate 中文 韩语 안녕하세요
+机器人: 🌐 翻译结果（韩语 → 中文）：
+你好
+
+用户: /translate 英语 韩语 Hello
+机器人: 🌐 翻译结果（英语 → 韩语）：
+안녕하세요
+```
+
+#### 功能特性
+
+- ✅ 自动检测语言（中文、英语、日语、韩语）
+- ✅ 支持任意语言组合互译
+- ✅ 文本长度限制：500 字符
+- ✅ 支持中文别名指令：`@机器人 翻译 <文本>`
+
+#### 注意事项
+
+- ⚠️ 源语言和目标语言不能相同
+- ⚠️ 文本长度不能超过 500 字符
+- ⚠️ 日语和韩语检测基于字符集（平假名、片假名、韩文字母）
+
+---
+
+### 6.4.2 部署功能 (`/deploy`)
+
+#### 指令格式
+
+1. **基本部署**：`/deploy <环境>`
+   - 触发指定环境的部署流程
+   - 需要二次确认（防误操作）
+   - 示例：`/deploy dev` → 部署到开发环境
+
+2. **指定部署目标**：`/deploy <环境> --target <目标>`
+   - 部署到指定环境的特定目标服务器
+   - 示例：`/deploy prod --target aliyun` → 部署到生产环境（阿里云）
+
+#### 可用环境
+
+| 环境参数 | 环境名称 | 说明 |
+|---------|---------|------|
+| `dev` | 开发环境 | 用于开发和测试 |
+| `test` | 测试环境 | 用于集成测试 |
+| `staging` | 预发布环境 | 用于预发布验证 |
+| `prod` / `production` | 生产环境 | 用于正式发布（需要额外确认） |
+
+#### 部署目标（--target 参数）
+
+| 目标参数 | 说明 |
+|---------|------|
+| `default` | 默认服务器 |
+| `server1` | 服务器1 |
+| `server2` | 服务器2 |
+| `aliyun` | 阿里云 |
+| `aws` | AWS（亚马逊云） |
+| `tencent` | 腾讯云 |
+
+#### 使用示例
+
+```
+用户: /deploy dev
+机器人: ⚠️ 敏感操作确认
+
+📦 操作：部署到 dev 环境
+📡 部署目标：default
+👤 操作者：xxx
+🕐 时间：2026-06-07 22:00:00
+
+❗ 请输入以下命令确认部署：
+`/deploy dev --confirm abc123`
+
+⏰ 确认令牌有效期：5 分钟
+💡 如需取消，请忽略此消息
+
+用户: /deploy dev --confirm abc123
+机器人: 🚀 部署已触发
+
+📦 环境：dev
+📡 部署目标：default
+📂 仓库：Claire-bit-cpu/Test
+🔧 工作流：deploy-dev.yml
+👤 操作者：xxx
+🕐 时间：2026-06-07 22:00:00
+🆔 部署 ID：deploy-dev-20260607220000-abc123
+
+📢 部署完成后将通过飞书通知您
+
+🔗 GitHub Actions: Claire-bit-cpu/Test/actions
+```
+
+#### 部署目标示例
+
+```
+# 部署到开发环境（默认目标）
+用户: /deploy dev
+
+# 部署到测试环境（阿里云）
+用户: /deploy test --target aliyun
+
+# 部署到生产环境（腾讯云）
+用户: /deploy prod --target tencent
+
+# 部署到预发布环境（AWS）
+用户: /deploy staging --target aws
+```
+
+#### 功能特性
+
+- ✅ 二次确认机制（防误操作）
+- ✅ 支持多个部署目标（default、server1、server2、aliyun、aws、tencent）
+- ✅ 部署完成后自动发送飞书通知
+- ✅ 生产环境需要额外确认
+- ✅ 支持 GitHub Actions 回调通知（真正的部署成功/失败检测）
+- ✅ 未配置 GitHub 时进入模拟模式（用于测试）
+
+#### 配置说明
+
+##### GitHub 配置（application.yaml）
+
+```yaml
+github:
+  token: ${GITHUB_TOKEN:}  # GitHub Personal Access Token
+  api-url: https://api.github.com
+  webhook-secret: ${GITHUB_WEBHOOK_SECRET:}
+  repo-aliases: ${GITHUB_REPO_ALIASES:}  # 仓库别名配置
+  deploy: ${GITHUB_DEPLOY:}  # 部署配置
+```
+
+##### 部署配置示例
+
+```yaml
+github:
+  deploy: "dev:Claire-bit-cpu/Test:deploy-dev.yml:develop,test:Claire-bit-cpu/Test:deploy-test.yml:test"
+```
+
+格式：`环境:仓库名:工作流文件名:分支名`
+
+##### 回调配置（可选）
+
+如果需要真正的部署成功/失败检测，配置回调：
+
+```yaml
+github:
+  callback:
+    url: ${GITHUB_CALLBACK_URL:}
+    secret: ${GITHUB_CALLBACK_SECRET:}
+```
+
+#### 通知说明
+
+部署完成后，系统会发送飞书通知：
+
+- ✅ **部署成功**：`✅ Java 部署成功`
+- ❌ **部署失败**：`❌ Java 部署失败`
+-  环境、部署目标、仓库、分支、操作者、时间等详细信息
+
+#### 注意事项
+
+- ⚠️ 部署操作需要开发者权限（`DEVELOPER` 级别）
+- ⚠️ 生产环境部署需要额外确认
+- ⚠️ 确认令牌有效期：5 分钟
+- ⚠️ 需要配置 `notification.default-chat-ids` 才能收到部署通知
+
+---
+
+## 7.Webhook 配置教程
+
+### 7.1 飞书 Webhook 配置
 
 #### 步骤 1：创建飞书应用
 
@@ -928,7 +1100,7 @@ export FEISHU_ENCRYPT_KEY=your_encrypt_key
 
 ---
 
-## 开发指南 (Developer Guide)
+## 8.开发指南 (Developer Guide)
 
 ### 插件机制：如何添加自定义指令
 
@@ -1079,24 +1251,29 @@ public void execute(CommandContext context) {
 
 ---
 
-## 交付产物说明
+## 9.交付产物说明
 
-### 1. 可部署的机器人后端
+### 9.1 可部署的机器人后端
 
 - **可执行 JAR**：`IntelligentRobot-0.0.1-SNAPSHOT.jar`
-- **Docker 镜像**：支持容器化部署
-- **配置文件**：`application.yaml`（支持环境变量覆盖）
+- **配置方式**：所有配置项均支持通过环境变量覆盖（无需修改配置文件）
+- **可选生产配置**：`application-prod.yaml`（放在 JAR 同级目录，生产环境推荐使用）
 - **启动脚本**：`mvnw` (Linux/Mac) / `mvnw.cmd` (Windows)
 
-### 2. 可公开测试的飞书群
+### 9.2 可公开测试的飞书群
 
 - 将机器人添加到测试群聊
 - 成员可 @机器人 测试所有指令
 - 支持多群同时接入（通过 `chat_id` 区分）
+- 加入测试群方法：
+1. 先加入测试企业，点击链接 https://test-diiw8liupxq8.feishu.cn/invite/member/rES_3GR1zNQ
+2. 再扫测试群二维码加入测试群
+![测试群二维码](docs/测试群二维码.png)
 
-### 3. 测试视频（8~12 分钟）
+### 9.3 测试视频（8~12 分钟）
 
-视频应涵盖以下演示内容：
+- 视频链接：https://t.bilibili.com/1211213221707382791?share_source=pc_native
+- 视频涵盖以下演示内容：
 
 | 时间段 | 演示内容 |
 |--------|---------|
@@ -1107,12 +1284,25 @@ public void execute(CommandContext context) {
 | 8~10 分钟 | 部署触发演示（`/deploy`，含二次确认） |
 | 10~12 分钟 | 高级功能演示（上下文感知、搜索、监控） |
 
-### 4. 文档清单
+### 9.4 文档清单
 
-- ✅ `README.md` - 项目说明与快速开始
+####  核心文档
+- ✅ `docs/README.md` - 项目完整文档（本文档）
+- ✅ `docs/DEPLOY_CONFIG.md` - 部署配置完全指南（含方案 A/B）
+
+####  项目文档
+- ✅ `docs/需求文档.md` - 项目需求文档
+- ✅ `docs/答辩文档.md` - 项目答辩文档
+
+####  配置示例
+- ✅ `docs/deploy-dev.yml.example` - GitHub Actions 工作流示例
+
+####  使用指南
 - ✅ `docs/guides/JIRA-LOCAL-MODE.md` - JIRA 本地模式指南
 - ✅ `docs/guides/智能降噪集成指南.md` - 智能降噪配置指南
-- ✅ `docs/需求文档.md` - 项目需求文档
+
+####  资源文件
+- ✅ `docs/测试群二维码.png` - 测试群二维码
 
 ---
 
@@ -1178,15 +1368,6 @@ jira:
   enabled: ${JIRA_ENABLED:false}
   local-fallback-file: ${JIRA_LOCAL_FALLBACK_FILE:./local_tasks.md}
 
-# ==================== 监控配置 ====================
-prometheus:
-  url: ${PROMETHEUS_URL:http://localhost:9090}
-  enabled: ${PROMETHEUS_ENABLED:false}
-grafana:
-  url: ${GRAFANA_URL:http://localhost:3000}
-  api-key: ${GRAFANA_API_KEY:}
-  enabled: ${GRAFANA_ENABLED:false}
-
 # ==================== 通知配置 ====================
 notification:
   db-path: ${NOTIFICATION_DB_PATH:./notification.db}
@@ -1225,27 +1406,6 @@ ratelimit:
 
 ---
 
-## 监控与管理
-
-### Actuator 端点
-
-| 端点 | 描述 |
-|------|------|
-| `/actuator/health` | 应用健康检查 |
-| `/actuator/info` | 应用信息 |
-| `/actuator/prometheus` | Prometheus 指标暴露 |
-
-### 自定义监控端点
-
-| 端点 | 描述 |
-|------|------|
-| `GET /api/task/{taskId}` | 查询异步任务状态 |
-| `GET /api/task/count` | 获取当前任务数量 |
-| `GET /api/monitor/threadpool` | 获取线程池指标 |
-| `GET /api/redis/info` | Redis 连接信息 |
-
----
-
 ## 贡献指南
 
 欢迎提交 Issue 和 Pull Request！
@@ -1268,8 +1428,8 @@ ratelimit:
 
 ## 联系方式
 
-- **Issue Tracker**: [GitHub Issues](https://github.com/your-username/IntelligentRobot/issues)
-- **Documentation**: [项目 Wiki](https://github.com/your-username/IntelligentRobot/wiki)
+- **邮箱**:  3203264696@qq.com
+- **QQ**:  3203264696
 
 ---
 

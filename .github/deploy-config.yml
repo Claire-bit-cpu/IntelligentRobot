@@ -1,0 +1,352 @@
+# 部署配置文件
+# 使用方法：在 GitHub 仓库的 Settings > Variables 和 Settings > Secrets 中配置对应的值
+# 此文件定义部署目标的结构和所需配置，实际敏感信息存储在 GitHub Secrets 中
+
+# 默认部署目标配置
+default:
+  name: "默认服务器"
+  description: "默认部署目标"
+  # 部署脚本模板（实际脚本在 GitHub Actions 工作流中执行）
+  deploy:
+    # SSH 连接信息（从 GitHub Variables/Secrets 读取）
+    ssh_host: ${{ vars.DEPLOY_DEFAULT_HOST }}
+    ssh_user: ${{ vars.DEPLOY_DEFAULT_USER }}
+    ssh_key: ${{ secrets.DEPLOY_DEFAULT_SSH_KEY }}
+    # 部署路径
+    remote_path: ${{ vars.DEPLOY_DEFAULT_PATH || '/app' }}
+    # 部署命令（根据实际情况修改）
+    commands:
+      - "cd ${{ vars.DEPLOY_DEFAULT_PATH || '/app' }}"
+      - "git pull origin main"
+      - "npm install --production"
+      - "pm2 restart app || pm2 start app.js --name app"
+  # 健康检查配置
+  health_check:
+    enabled: true
+    url: ${{ vars.DEPLOY_DEFAULT_HEALTH_URL || 'http://localhost:3000/health' }}
+    timeout: 30
+  # 所需 GitHub Variables（非敏感配置）
+  required_variables:
+    - name: DEPLOY_DEFAULT_HOST
+      description: "默认服务器 SSH 主机地址"
+      required: true
+    - name: DEPLOY_DEFAULT_USER
+      description: "默认服务器 SSH 用户名"
+      required: true
+    - name: DEPLOY_DEFAULT_PATH
+      description: "默认服务器部署路径（可选，默认 /app）"
+      required: false
+    - name: DEPLOY_DEFAULT_HEALTH_URL
+      description: "健康检查 URL（可选）"
+      required: false
+  # 所需 GitHub Secrets（敏感信息）
+  required_secrets:
+    - name: DEPLOY_DEFAULT_SSH_KEY
+      description: "默认服务器 SSH 私钥"
+      required: true
+
+# Server1 部署目标配置
+server1:
+  name: "服务器 1"
+  description: "第一台服务器部署目标"
+  deploy:
+    ssh_host: ${{ vars.DEPLOY_SERVER1_HOST }}
+    ssh_user: ${{ vars.DEPLOY_SERVER1_USER }}
+    ssh_key: ${{ secrets.DEPLOY_SERVER1_SSH_KEY }}
+    remote_path: ${{ vars.DEPLOY_SERVER1_PATH || '/app' }}
+    commands:
+      - "cd ${{ vars.DEPLOY_SERVER1_PATH || '/app' }}"
+      - "git pull origin main"
+      - "npm install --production"
+      - "systemctl restart app"
+  health_check:
+    enabled: true
+    url: ${{ vars.DEPLOY_SERVER1_HEALTH_URL || 'http://localhost:3000/health' }}
+    timeout: 30
+  required_variables:
+    - name: DEPLOY_SERVER1_HOST
+      description: "Server1 SSH 主机地址"
+      required: true
+    - name: DEPLOY_SERVER1_USER
+      description: "Server1 SSH 用户名"
+      required: true
+    - name: DEPLOY_SERVER1_PATH
+      description: "Server1 部署路径（可选，默认 /app）"
+      required: false
+    - name: DEPLOY_SERVER1_HEALTH_URL
+      description: "Server1 健康检查 URL（可选）"
+      required: false
+  required_secrets:
+    - name: DEPLOY_SERVER1_SSH_KEY
+      description: "Server1 SSH 私钥"
+      required: true
+
+# Server2 部署目标配置
+server2:
+  name: "服务器 2"
+  description: "第二台服务器部署目标"
+  deploy:
+    ssh_host: ${{ vars.DEPLOY_SERVER2_HOST }}
+    ssh_user: ${{ vars.DEPLOY_SERVER2_USER }}
+    ssh_key: ${{ secrets.DEPLOY_SERVER2_SSH_KEY }}
+    remote_path: ${{ vars.DEPLOY_SERVER2_PATH || '/app' }}
+    commands:
+      - "cd ${{ vars.DEPLOY_SERVER2_PATH || '/app' }}"
+      - "git pull origin main"
+      - "npm install --production"
+      - "systemctl restart app"
+  health_check:
+    enabled: true
+    url: ${{ vars.DEPLOY_SERVER2_HEALTH_URL || 'http://localhost:3000/health' }}
+    timeout: 30
+  required_variables:
+    - name: DEPLOY_SERVER2_HOST
+      description: "Server2 SSH 主机地址"
+      required: true
+    - name: DEPLOY_SERVER2_USER
+      description: "Server2 SSH 用户名"
+      required: true
+    - name: DEPLOY_SERVER2_PATH
+      description: "Server2 部署路径（可选，默认 /app）"
+      required: false
+    - name: DEPLOY_SERVER2_HEALTH_URL
+      description: "Server2 健康检查 URL（可选）"
+      required: false
+  required_secrets:
+    - name: DEPLOY_SERVER2_SSH_KEY
+      description: "Server2 SSH 私钥"
+      required: true
+
+# 阿里云部署目标配置
+aliyun:
+  name: "阿里云"
+  description: "阿里云部署目标（支持 ECS、函数计算、OSS 等）"
+  deploy:
+    # 阿里云配置
+    access_key_id: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+    access_key_secret: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+    region: ${{ vars.ALIYUN_REGION || 'cn-hangzhou' }}
+    # 部署类型：ecs | function | oss
+    deploy_type: ${{ vars.ALIYUN_DEPLOY_TYPE || 'ecs' }}
+    # ECS 部署配置
+    ecs:
+      instance_id: ${{ vars.ALIYUN_ECS_INSTANCE_ID }}
+      ssh_host: ${{ vars.ALIYUN_ECS_HOST }}
+      ssh_user: ${{ vars.ALIYUN_ECS_USER || 'root' }}
+      ssh_key: ${{ secrets.ALIYUN_ECS_SSH_KEY }}
+      remote_path: ${{ vars.ALIYUN_ECS_PATH || '/app' }}
+    # OSS 部署配置
+    oss:
+      bucket: ${{ vars.ALIYUN_OSS_BUCKET }}
+      endpoint: ${{ vars.ALIYUN_OSS_ENDPOINT }}
+    # 函数计算部署配置
+    function:
+      service: ${{ vars.ALIYUN_FC_SERVICE }}
+      function: ${{ vars.ALIYUN_FC_FUNCTION }}
+  health_check:
+    enabled: true
+    url: ${{ vars.ALIYUN_HEALTH_URL }}
+    timeout: 30
+  required_variables:
+    - name: ALIYUN_REGION
+      description: "阿里云区域（可选，默认 cn-hangzhou）"
+      required: false
+    - name: ALIYUN_DEPLOY_TYPE
+      description: "部署类型：ecs | function | oss（可选，默认 ecs）"
+      required: false
+    - name: ALIYUN_ECS_INSTANCE_ID
+      description: "阿里云 ECS 实例 ID（ECS 部署时必填）"
+      required: false
+    - name: ALIYUN_ECS_HOST
+      description: "阿里云 ECS SSH 主机地址（ECS 部署时必填）"
+      required: false
+    - name: ALIYUN_ECS_USER
+      description: "阿里云 ECS SSH 用户名（可选，默认 root）"
+      required: false
+    - name: ALIYUN_ECS_PATH
+      description: "阿里云 ECS 部署路径（可选，默认 /app）"
+      required: false
+    - name: ALIYUN_OSS_BUCKET
+      description: "阿里云 OSS Bucket 名称（OSS 部署时必填）"
+      required: false
+    - name: ALIYUN_OSS_ENDPOINT
+      description: "阿里云 OSS Endpoint（OSS 部署时必填）"
+      required: false
+    - name: ALIYUN_FC_SERVICE
+      description: "阿里云函数计算服务名（函数计算部署时必填）"
+      required: false
+    - name: ALIYUN_FC_FUNCTION
+      description: "阿里云函数计算函数名（函数计算部署时必填）"
+      required: false
+    - name: ALIYUN_HEALTH_URL
+      description: "健康检查 URL（可选）"
+      required: false
+  required_secrets:
+    - name: ALIYUN_ACCESS_KEY_ID
+      description: "阿里云 AccessKey ID"
+      required: true
+    - name: ALIYUN_ACCESS_KEY_SECRET
+      description: "阿里云 AccessKey Secret"
+      required: true
+    - name: ALIYUN_ECS_SSH_KEY
+      description: "阿里云 ECS SSH 私钥（ECS 部署时必填）"
+      required: false
+
+# AWS 部署目标配置
+aws:
+  name: "AWS"
+  description: "AWS 部署目标（支持 EC2、Lambda、S3 等）"
+  deploy:
+    # AWS 配置
+    access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+    secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    region: ${{ vars.AWS_REGION || 'us-east-1' }}
+    # 部署类型：ec2 | lambda | s3
+    deploy_type: ${{ vars.AWS_DEPLOY_TYPE || 'ec2' }}
+    # EC2 部署配置
+    ec2:
+      instance_id: ${{ vars.AWS_EC2_INSTANCE_ID }}
+      ssh_host: ${{ vars.AWS_EC2_HOST }}
+      ssh_user: ${{ vars.AWS_EC2_USER || 'ubuntu' }}
+      ssh_key: ${{ secrets.AWS_EC2_SSH_KEY }}
+      remote_path: ${{ vars.AWS_EC2_PATH || '/app' }}
+    # S3 部署配置
+    s3:
+      bucket: ${{ vars.AWS_S3_BUCKET }}
+      region: ${{ vars.AWS_S3_REGION || vars.AWS_REGION || 'us-east-1' }}
+    # Lambda 部署配置
+    lambda:
+      function_name: ${{ vars.AWS_LAMBDA_FUNCTION_NAME }}
+  health_check:
+    enabled: true
+    url: ${{ vars.AWS_HEALTH_URL }}
+    timeout: 30
+  required_variables:
+    - name: AWS_REGION
+      description: "AWS 区域（可选，默认 us-east-1）"
+      required: false
+    - name: AWS_DEPLOY_TYPE
+      description: "部署类型：ec2 | lambda | s3（可选，默认 ec2）"
+      required: false
+    - name: AWS_EC2_INSTANCE_ID
+      description: "AWS EC2 实例 ID（EC2 部署时必填）"
+      required: false
+    - name: AWS_EC2_HOST
+      description: "AWS EC2 SSH 主机地址（EC2 部署时必填）"
+      required: false
+    - name: AWS_EC2_USER
+      description: "AWS EC2 SSH 用户名（可选，默认 ubuntu）"
+      required: false
+    - name: AWS_EC2_PATH
+      description: "AWS EC2 部署路径（可选，默认 /app）"
+      required: false
+    - name: AWS_S3_BUCKET
+      description: "AWS S3 Bucket 名称（S3 部署时必填）"
+      required: false
+    - name: AWS_S3_REGION
+      description: "AWS S3 区域（可选，默认与 AWS_REGION 相同）"
+      required: false
+    - name: AWS_LAMBDA_FUNCTION_NAME
+      description: "AWS Lambda 函数名（Lambda 部署时必填）"
+      required: false
+    - name: AWS_HEALTH_URL
+      description: "健康检查 URL（可选）"
+      required: false
+  required_secrets:
+    - name: AWS_ACCESS_KEY_ID
+      description: "AWS Access Key ID"
+      required: true
+    - name: AWS_SECRET_ACCESS_KEY
+      description: "AWS Secret Access Key"
+      required: true
+    - name: AWS_EC2_SSH_KEY
+      description: "AWS EC2 SSH 私钥（EC2 部署时必填）"
+      required: false
+
+# 腾讯云部署目标配置
+tencent:
+  name: "腾讯云"
+  description: "腾讯云部署目标（支持 CVM、云函数、COS 等）"
+  deploy:
+    # 腾讯云配置
+    secret_id: ${{ secrets.TENCENT_SECRET_ID }}
+    secret_key: ${{ secrets.TENCENT_SECRET_KEY }}
+    region: ${{ vars.TENCENT_REGION || 'ap-guangzhou' }}
+    # 部署类型：cvm | scf | cos
+    deploy_type: ${{ vars.TENCENT_DEPLOY_TYPE || 'cvm' }}
+    # CVM 部署配置
+    cvm:
+      instance_id: ${{ vars.TENCENT_CVM_INSTANCE_ID }}
+      ssh_host: ${{ vars.TENCENT_CVM_HOST }}
+      ssh_user: ${{ vars.TENCENT_CVM_USER || 'root' }}
+      ssh_key: ${{ secrets.TENCENT_CVM_SSH_KEY }}
+      remote_path: ${{ vars.TENCENT_CVM_PATH || '/app' }}
+    # COS 部署配置
+    cos:
+      bucket: ${{ vars.TENCENT_COS_BUCKET }}
+      region: ${{ vars.TENCENT_COS_REGION || vars.TENCENT_REGION || 'ap-guangzhou' }}
+    # 云函数部署配置
+    scf:
+      function_name: ${{ vars.TENCENT_SCF_FUNCTION_NAME }}
+      namespace: ${{ vars.TENCENT_SCF_NAMESPACE || 'default' }}
+  health_check:
+    enabled: true
+    url: ${{ vars.TENCENT_HEALTH_URL }}
+    timeout: 30
+  required_variables:
+    - name: TENCENT_REGION
+      description: "腾讯云区域（可选，默认 ap-guangzhou）"
+      required: false
+    - name: TENCENT_DEPLOY_TYPE
+      description: "部署类型：cvm | scf | cos（可选，默认 cvm）"
+      required: false
+    - name: TENCENT_CVM_INSTANCE_ID
+      description: "腾讯云 CVM 实例 ID（CVM 部署时必填）"
+      required: false
+    - name: TENCENT_CVM_HOST
+      description: "腾讯云 CVM SSH 主机地址（CVM 部署时必填）"
+      required: false
+    - name: TENCENT_CVM_USER
+      description: "腾讯云 CVM SSH 用户名（可选，默认 root）"
+      required: false
+    - name: TENCENT_CVM_PATH
+      description: "腾讯云 CVM 部署路径（可选，默认 /app）"
+      required: false
+    - name: TENCENT_COS_BUCKET
+      description: "腾讯云 COS Bucket 名称（COS 部署时必填）"
+      required: false
+    - name: TENCENT_COS_REGION
+      description: "腾讯云 COS 区域（可选，默认与 TENCENT_REGION 相同）"
+      required: false
+    - name: TENCENT_SCF_FUNCTION_NAME
+      description: "腾讯云云函数名称（SCF 部署时必填）"
+      required: false
+    - name: TENCENT_SCF_NAMESPACE
+      description: "腾讯云云函数命名空间（可选，默认 default）"
+      required: false
+    - name: TENCENT_HEALTH_URL
+      description: "健康检查 URL（可选）"
+      required: false
+  required_secrets:
+    - name: TENCENT_SECRET_ID
+      description: "腾讯云 SecretId"
+      required: true
+    - name: TENCENT_SECRET_KEY
+      description: "腾讯云 SecretKey"
+      required: true
+    - name: TENCENT_CVM_SSH_KEY
+      description: "腾讯云 CVM SSH 私钥（CVM 部署时必填）"
+      required: false
+
+# 通知配置
+notification:
+  feishu:
+    enabled: true
+    webhook: ${{ secrets.FEISHU_DEPLOY_WEBHOOK }}
+  # 可扩展其他通知方式（钉钉、Slack 等）
+  dingtalk:
+    enabled: false
+    webhook: ${{ secrets.DINGTALK_WEBHOOK }}
+  slack:
+    enabled: false
+    webhook: ${{ secrets.SLACK_WEBHOOK }}

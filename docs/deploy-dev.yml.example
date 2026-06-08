@@ -1,0 +1,114 @@
+# GitHub Actions 工作流示例 - deploy-dev.yml
+# 部署到开发环境，并在完成后回调通知
+
+name: Deploy to Dev Environment
+
+# 触发条件
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_id:
+        description: '部署 ID（用于回调追踪）'
+        required: false
+        default: ''
+      callback_url:
+        description: '回调 URL（部署完成后调用）'
+        required: false
+        default: ''
+
+# 环境变量
+env:
+  DEPLOY_ID: ${{ github.event.inputs.deploy_id || 'unknown' }}
+  CALLBACK_URL: ${{ github.event.inputs.callback_url || '' }}
+
+jobs:
+  deploy:
+    name: Deploy to Dev
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: develop  # 开发环境使用 develop 分支
+      
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+      
+      - name: 📦 Install Dependencies
+        run: npm ci
+      
+      - name: 🏗️ Build
+        run: npm run build
+      
+      - name: 🚀 Deploy to Dev Server
+        run: |
+          echo "🚀 开始部署到开发环境..."
+          # 这里添加你的部署脚本
+          # 例如：rsync, scp, SSH 部署等
+          echo "✅ 部署完成"
+        env:
+          DEPLOY_ENV: dev
+      
+      - name: 🔍 Health Check
+        run: |
+          echo "🔍 执行健康检查..."
+          # 检查部署是否成功
+          # 例如：curl http://dev-server/health
+          sleep 5
+          echo "✅ 健康检查通过"
+      
+      - name: 📣 回调通知（成功）
+        if: success() && env.CALLBACK_URL != ''
+        run: |
+          echo "📣 发送成功回调..."
+          curl -X POST "$CALLBACK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"status\": \"success\",
+              \"environment\": \"dev\",
+              \"repository\": \"${{ github.repository }}\",
+              \"workflow\": \"${{ github.workflow }}\",
+              \"run_id\": \"${{ github.run_id }}\",
+              \"deploy_id\": \"${{ env.DEPLOY_ID }}\",
+              \"triggered_by\": \"${{ github.actor }}\",
+              \"timestamp\": \"$(date -u +'%Y-%m-%dT%H:%M:%SZ')\"
+            }"
+        continue-on-error: true  # 回调失败不影响部署结果
+      
+      - name: 📣 回调通知（失败）
+        if: failure() && env.CALLBACK_URL != ''
+        run: |
+          echo "📣 发送失败回调..."
+          curl -X POST "$CALLBACK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"status\": \"failure\",
+              \"environment\": \"dev\",
+              \"repository\": \"${{ github.repository }}\",
+              \"workflow\": \"${{ github.workflow }}\",
+              \"run_id\": \"${{ github.run_id }}\",
+              \"deploy_id\": \"${{ env.DEPLOY_ID }}\",
+              \"triggered_by\": \"${{ github.actor }}\",
+              \"timestamp\": \"$(date -u +'%Y-%m-%dT%H:%M:%SZ')\"
+            }"
+        continue-on-error: true  # 回调失败不影响部署结果
+
+  # 可选：通知 job（如果上面的回调失败，这里可以发送飞书通知）
+  notify:
+    name: Send Notification
+    needs: deploy
+    if: always()
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📢 发送飞书通知
+        if: env.CALLBACK_URL == ''
+        run: |
+          # 如果回调 URL 未配置，可以直接在这里发送飞书通知
+          echo "📢 发送通知..."
+          # 这里可以调用飞书 Webhook
+        continue-on-error: true
