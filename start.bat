@@ -4,9 +4,26 @@ REM ============================================================
 REM 智能机器人 - Windows 一键启动脚本
 REM 使用方法：
 REM   1. 将此文件放在 jar 同级目录
-REM   2. 设置系统环境变量（参见下方列表）
-REM   3. 双击运行即可启动服务
+REM   2. 复制 .env.example 为 .env 并填写配置（推荐）
+REM   3. 或设置系统环境变量（参见下方列表）
+REM   4. 双击运行即可启动服务
 REM ============================================================
+
+REM ==================== 读取 .env 文件 ====================
+if exist ".env" (
+    echo 正在从 .env 文件加载环境变量...
+    
+    REM 使用 PowerShell 读取 .env 文件并设置环境变量
+    powershell -NoProfile -Command "$content = Get-Content '.env' -ErrorAction SilentlyContinue; foreach ($line in $content) { $line = $line.Trim(); if ($line -and -not $line.StartsWith('#')) { $eqIndex = $line.IndexOf('='); if ($eqIndex -gt 0) { $name = $line.Substring(0, $eqIndex).Trim(); $value = $line.Substring($eqIndex + 1).Trim(); if ($name -and $value) { [Environment]::SetEnvironmentVariable($name, $value, 'Process') } } } }"
+    
+    echo 环境变量加载完成
+    echo.
+) else (
+    echo 警告：未找到 .env 文件
+    echo 请复制 .env.example 为 .env 并填写配置：
+    echo   copy .env.example .env
+    echo.
+)
 
 REM ==================== 环境变量设置说明 ====================
 REM 请在运行此脚本前设置以下环境变量：
@@ -147,15 +164,19 @@ echo ============================================================
 echo 环境变量检查失败！
 echo ============================================================
 echo.
-echo 请设置缺失的环境变量后重新运行。
+echo 【推荐方法】使用 .env 文件配置：
+echo   1. 复制模板文件：copy .env.example .env
+echo   2. 用文本编辑器打开 .env 文件
+echo   3. 填写必填配置项（FEISHU_APP_ID、FEISHU_APP_SECRET 等）
+echo   4. 保存文件后重新运行 start.bat
 echo.
-echo 临时设置方法（命令提示符中执行）：
+echo 【备选方法】临时设置环境变量（命令提示符中执行）：
 echo   set FEISHU_APP_ID=your_app_id
 echo   set FEISHU_APP_SECRET=your_app_secret
 echo   set FEISHU_ENCRYPT_KEY=your_encrypt_key
 echo   set QIANWEN_API_KEY=your_api_key
 echo.
-echo 永久设置方法：
+echo 【备选方法】永久设置环境变量：
 echo   1. 打开"系统属性" → "高级" → "环境变量"
 echo   2. 在"用户变量"或"系统变量"中添加环境变量
 echo   3. 重新启动命令提示符使设置生效

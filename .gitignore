@@ -39,6 +39,9 @@ build/
 *.db.bak
 search-index.*
 
+# Environment variables (contains sensitive information)
+.env
+
 # Build output
 /target/
 *.class

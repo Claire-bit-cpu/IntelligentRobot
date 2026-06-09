@@ -658,62 +658,131 @@ cd IntelligentRobot
 
 ### 5.2 配置环境变量
 
-创建 `.env` 文件或直接设置环境变量：
+**【推荐方法】使用 `.env` 文件配置**
+
+1. **复制模板文件**：
+   ```bash
+   # Linux/Mac
+   cp .env.example .env
+   
+   # Windows
+   copy .env.example .env
+   ```
+
+2. **编辑 `.env` 文件**：
+   - 用文本编辑器打开 `.env` 文件
+   - 填写必填配置项（见下方列表）
+   - 保存文件
+
+3. **启动服务**：
+   ```bash
+   # Windows
+   start.bat
+   
+   # Linux/Mac
+   ./mvnw spring-boot:run
+   ```
+
+**【备选方法】直接设置环境变量**
+
+如果不使用 `.env` 文件，也可以直接设置系统环境变量：
 
 ```bash
-# 飞书配置（必填）
+# Linux/Mac
 export FEISHU_APP_ID=your_app_id
 export FEISHU_APP_SECRET=your_app_secret
-export FEISHU_ENCRYPT_KEY=your_encrypt_key  # 可选，启用加密时需要
 
-# Redis 配置（必填）
-export REDIS_HOST=localhost
-export REDIS_PORT=6379
-export REDIS_PASSWORD=  # 如无密码留空
-
-# AI 配置（可选，启用代码审查时需要）
-export QIANWEN_API_KEY=your_qianwen_api_key
-
-# GitHub 配置（可选，启用 Git 集成时需要）
-export GITHUB_TOKEN=your_github_token
-export GITHUB_WEBHOOK_SECRET=your_webhook_secret
-export GITHUB_REPO_ALIASES=frontend=owner/repo,backend=owner/repo
-export GITHUB_ADMIN_OPEN_IDS=ou_xxx,ou_yyy
-export GITHUB_DEVELOPER_OPEN_IDS=ou_aaa,ou_bbb
-
-# 部署配置（可选）
-export GITHUB_DEPLOY="dev:owner/repo:deploy-dev.yml:develop,prod:owner/repo:deploy-prod.yml:main"
-
-# JIRA 配置（可选）
-export JIRA_URL=https://your-domain.atlassian.net
-export JIRA_USERNAME=your_email
-export JIRA_API_TOKEN=your_api_token
-
-# 高德地图 API（可选，启用天气查询时需要）
-export AMAP_KEY=your_amap_api_key
-
-# ==================== 搜索引擎配置 ====================
-# SQLite FTS5 搜索引擎索引文件路径
-export SEARCH_INDEX_PATH=./search-index.db
-# 启动后延迟执行首次同步的毫秒数（默认 30000，即 30 秒）
-export SEARCH_STARTUP_DELAY_MS=30000
-# 调用飞书 API 的延迟毫秒数（避免频繁调用）
-export SEARCH_API_CALL_DELAY_MS=300
-
-# ==================== 上下文管理器配置 ====================
-# 用户无活动后自动清理全局参数的时间（分钟，默认 30）
-export CONTEXT_GLOBAL_PARAM_TTL_MINUTES=30
-
-# ==================== 欢迎消息配置 ====================
-# 批量欢迎消息的合并窗口时间（毫秒，默认 5000）
-export WELCOME_BATCH_WINDOW_MS=5000
-
-# ==================== 任务状态配置 ====================
-# 任务日志的最大长度（字符数，默认 10000）
-export TASK_STATUS_MAX_LOGS_LENGTH=10000
-# 任务监控卡片推送的群聊 ID（可选）
-export TASK_MONITOR_CHAT_ID=oc_xxx
+# Windows (cmd)
+set FEISHU_APP_ID=your_app_id
+set FEISHU_APP_SECRET=your_app_secret
 ```
+
+---
+
+#### 配置项说明
+
+##### 【必填】飞书配置
+```bash
+# 飞书应用 ID（在飞书开放平台 → 应用管理 → 凭证与基础信息 中获取）
+FEISHU_APP_ID=your_app_id
+
+# 飞书应用密钥（同上）
+FEISHU_APP_SECRET=your_app_secret
+
+# 飞书加密密钥（可选，启用消息加密时需要）
+FEISHU_ENCRYPT_KEY=your_encrypt_key
+```
+
+##### 【必填】Redis 配置
+```bash
+# Redis 主机地址（默认 localhost）
+REDIS_HOST=localhost
+
+# Redis 端口（默认 6379）
+REDIS_PORT=6379
+
+# Redis 密码（如无密码留空）
+REDIS_PASSWORD=
+```
+
+##### 【可选】AI 配置（启用代码审查时需要）
+```bash
+# 通义千问 API Key（在阿里云 DashScope 控制台获取）
+QIANWEN_API_KEY=your_qianwen_api_key
+
+# 通义千问模型（默认 qwen-turbo）
+QIANWEN_MODEL=qwen-turbo
+```
+
+##### 【可选】GitHub 配置（启用 Git 集成时需要）
+```bash
+# GitHub 个人访问令牌
+GITHUB_TOKEN=your_github_token
+
+# GitHub Webhook 密钥
+GITHUB_WEBHOOK_SECRET=your_webhook_secret
+
+# 仓库别名映射（格式：别名=owner/repo）
+GITHUB_REPO_ALIASES=frontend=owner/repo,backend=owner/repo
+
+# 管理员 Open ID（逗号分隔）
+GITHUB_ADMIN_OPEN_IDS=ou_xxx,ou_yyy
+
+# 开发者 Open ID（逗号分隔）
+GITHUB_DEVELOPER_OPEN_IDS=ou_aaa,ou_bbb
+```
+
+##### 【可选】JIRA 配置
+```bash
+JIRA_URL=https://your-domain.atlassian.net
+JIRA_USERNAME=your_email
+JIRA_API_TOKEN=your_api_token
+```
+
+##### 【可选】高德天气 API
+```bash
+AMAP_KEY=your_amap_api_key
+```
+
+##### 【可选】其他配置
+```bash
+# 搜索引擎配置
+SEARCH_INDEX_PATH=./search-index.db
+SEARCH_STARTUP_DELAY_MS=30000
+SEARCH_API_CALL_DELAY_MS=100
+
+# 上下文管理器配置
+CONTEXT_GLOBAL_PARAM_TTL_MINUTES=30
+
+# 欢迎消息配置
+WELCOME_BATCH_WINDOW_MS=5000
+
+# 任务状态配置
+TASK_STATUS_MAX_LOGS_LENGTH=10000
+TASK_MONITOR_CHAT_ID=oc_xxx
+```
+
+> **提示**：完整的配置项说明请参考 `.env.example` 文件，包含所有可用配置项的详细说明和默认值。
 
 ### 5.3 构建项目
 
